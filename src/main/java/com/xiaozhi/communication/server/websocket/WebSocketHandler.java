@@ -86,10 +86,10 @@ public class WebSocketHandler extends AbstractWebSocketHandler {
         String sessionId = session.getId();
         SysDevice device = sessionManager.getDeviceConfig(sessionId);
         String payload = message.getPayload();
-
+        logger.info("收到WebSocket消息 - SessionId: {}, Payload: {}", sessionId, payload);
         try {
             var msg = JsonUtil.fromJson(payload, Message.class);
-            if (Objects.requireNonNull(msg) instanceof HelloMessage m) {
+            if (msg instanceof HelloMessage m) {
                 handleHelloMessage(session, m);
             } else {
                 if (device == null || device.getRoleId() == null) {

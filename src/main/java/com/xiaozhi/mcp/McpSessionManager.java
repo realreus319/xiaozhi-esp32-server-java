@@ -28,9 +28,7 @@ public class McpSessionManager {
         // 注册系统全局工具
         Map<String, ToolCallback> globalFunctions = toolsGlobalRegistry.getAllFunctions(chatSession);
         
-        globalFunctions.forEach((toolName, toolCallback) -> {
-            functionSessionHolder.registerFunction(toolName, toolCallback);
-        });
+        globalFunctions.forEach(functionSessionHolder::registerFunction);
 
     }
     

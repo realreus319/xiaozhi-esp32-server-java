@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile-mysql
     ports:
-      - "13306:3306"  # 修改为 13306 或其他未使用的端口
+      - "3306:3306"  # 修改为 13306 或其他未使用的端口
     networks:
       - app-network
     volumes:
@@ -60,6 +60,23 @@ networks:
     driver: bridge
 
 volumes:
-  mysql_data:  # 定义持久化卷
-  maven_repo:  # 持久化Maven仓库
-  vosk_models:  # 持久化Vosk模型
+  mysql_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./dockerData/mysql           # ✅ 宿主机路径（相对当前 docker-compose.yml）
+
+  maven_repo:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./dockerData/maven_repo      # ✅ Maven 缓存路径
+
+  vosk_models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./dockerData/vosk_models     # ✅ 模型缓存路径
