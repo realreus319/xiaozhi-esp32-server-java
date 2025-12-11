@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile-mysql
     ports:
-      - "13306:3306"  # 修改为 13306 或其他未使用的端口
+      - "3306:3306"  # 修改为 13306 或其他未使用的端口
     networks:
       - app-network
     volumes:
@@ -28,38 +28,41 @@ services:
     networks:
       - app-network
     environment:
-      - API_URL=http://server:8091
+      - API_URL=http://host.docker.internal:8091
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
-  server:
-    build:
-      context: .
-      dockerfile: Dockerfile-server
-      args:
-        - VOSK_MODEL_SIZE=${VOSK_MODEL_SIZE:-small}
-      # 添加构建缓存设置
-      cache_from:
-        - eclipse-temurin:21-jre
-    depends_on:
-      mysql:
-        condition: service_healthy
-    ports:
-      - "8091:8091"
-    networks:
-      - app-network
-    environment:
-      - SPRING_DATA_REDIS_HOST=redis
-      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/xiaozhi?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
-      - SPRING_DATASOURCE_USERNAME=xiaozhi
-      - SPRING_DATASOURCE_PASSWORD=123456
-    volumes:
-      - maven_repo:/root/.m2/repository  # 持久化Maven仓库
-      - vosk_models:/vosk_cache  # 持久化Vosk模型
-    restart: on-failure  # 添加重启策略，如果启动失败会自动重试
+#  server:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile-server
+#      args:
+#        - VOSK_MODEL_SIZE=${VOSK_MODEL_SIZE:-small}
+#      # 添加构建缓存设置
+#      cache_from:
+#        - eclipse-temurin:21-jre
+#    depends_on:
+#      mysql:
+#        condition: service_healthy
+#    ports:
+#      - "8091:8091"
+#    networks:
+#      - app-network
+#    environment:
+#      - SPRING_DATA_REDIS_HOST=redis
+#      - SPRING_DATASOURCE_URL=jdbc:mysql://mysql:3306/xiaozhi?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+#      - SPRING_DATASOURCE_USERNAME=xiaozhi
+#      - SPRING_DATASOURCE_PASSWORD=123456
+#    volumes:
+#      - maven_repo:/root/.m2/repository  # 持久化Maven仓库
+#      - vosk_models:/vosk_cache  # 持久化Vosk模型
+#    restart: on-failure  # 添加重启策略，如果启动失败会自动重试
 
   redis:
     image: redis:latest
     container_name: redis
-    restart: always
+    ports:
+      - "6379:6379"
     networks:
       - app-network
 

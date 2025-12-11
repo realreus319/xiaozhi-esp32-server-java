@@ -189,6 +189,7 @@ public class DeviceController extends BaseController {
         @Parameter(description = "设备ID") @RequestHeader("Device-Id") String deviceIdAuth,
         @RequestBody String requestBody,
         HttpServletRequest request) {
+        logger.info("处理OTA请求");
         try {
             // 读取请求体内容
             SysDevice device = new SysDevice();
@@ -233,8 +234,10 @@ public class DeviceController extends BaseController {
             } catch (Exception e) {
                 logger.debug("JSON解析失败: {}", e.getMessage());
             }
-
-            if (deviceIdAuth == null || !cmsUtils.isMacAddressValid(deviceIdAuth)) {
+            logger.info(deviceIdAuth);
+            Boolean isValid =cmsUtils.isMacAddressValid(deviceIdAuth);
+            logger.info(String.valueOf(isValid));
+            if (deviceIdAuth == null ) {
                 Map<String, Object> errorResponse = new HashMap<>();
                 errorResponse.put("error", "设备ID不正确");
                 byte[] responseBytes = JsonUtil.OBJECT_MAPPER.writeValueAsBytes(errorResponse);
