@@ -61,7 +61,7 @@ public class DeviceController extends BaseController {
     @Resource
     private CmsUtils cmsUtils;
 
-    @Value("${xiaozhi.communication.protocol:both}")
+    @Value("${xiaozhi.communication.protocol:websocket}")
     private String communicationProtocol;
 
     /**
@@ -346,6 +346,7 @@ public class DeviceController extends BaseController {
     }
 
 
+    @SaIgnore
     @PostMapping("/ota/activate")
     @ResponseBody
     @Operation(summary = "查询OTA激活状态", description = "返回OTA激活状态")

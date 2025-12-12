@@ -225,11 +225,8 @@ public class CmsUtils {
         if (!macPattern.matcher(mac).matches()) {
             return false;
         }
-        // 校验MAC地址是否为单播地址
-        String normalized = mac.toLowerCase();
-        String[] parts = normalized.split("[:-]");
-        int firstByte = Integer.parseInt(parts[0], 16);
-        return (firstByte & 1) == 0; // 最低位为0表示单播地址，合法
+        // 不再校验MAC地址是否为单播地址，允许所有格式正确的MAC地址
+        return true;
     }
 
     /**

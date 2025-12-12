@@ -9,6 +9,7 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.HandlerInterceptor;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -31,8 +32,19 @@ public class SaTokenConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         // 注册Sa-Token拦截器，拦截所有API请求
         // 不需要登录的接口请使用 @SaIgnore 注解标注
-        registry.addInterceptor(new SaInterceptor(handle -> StpUtil.checkLogin()))
-                .addPathPatterns("/api/**");
+        registry.addInterceptor(new SaInterceptor(handle -> {
+            // 检查是否有 @SaIgnore 注解
+            if (handle instanceof HandlerMethod handlerMethod) {
+                if (handlerMethod.getMethodAnnotation(cn.dev33.satoken.annotation.SaIgnore.class) != null) {
+                    // 跳过认证
+                    return;
+                }
+            }
+            StpUtil.checkLogin();
+        }))
+        .addPathPatterns("/api/**")
+        .excludePathPatterns("/api/device/ota")
+        .excludePathPatterns("/api/device/ota/activate");
 
         // 注册用户信息设置拦截器，在sa-token之后执行
         registry.addInterceptor(new UserSetupInterceptor(userService))
