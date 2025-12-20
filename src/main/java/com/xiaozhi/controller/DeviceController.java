@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
@@ -196,11 +197,8 @@ public class DeviceController extends BaseController {
     public ResultMessage update(@PathVariable String deviceId, @Valid @RequestBody DeviceUpdateParam param) {
         try {
             SysDevice device = new SysDevice();
+            BeanUtils.copyProperties(param, device);
             device.setDeviceId(deviceId);
-            device.setDeviceName(param.getDeviceName());
-            device.setRoleId(param.getRoleId());
-            device.setFunctionNames(param.getFunctionNames());
-            device.setLocation(param.getLocation());
             device.setUserId(CmsUtils.getUserId());
 
             deviceService.update(device);

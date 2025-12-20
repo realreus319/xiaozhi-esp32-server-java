@@ -16,6 +16,7 @@ import com.xiaozhi.utils.CmsUtils;
 import com.xiaozhi.utils.DtoConverter;
 
 import io.swagger.v3.oas.annotations.Operation;
+import org.springframework.beans.BeanUtils;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
@@ -85,30 +86,8 @@ public class RoleController extends BaseController {
     public ResultMessage update(@PathVariable Integer roleId, @Valid @RequestBody RoleUpdateParam param) {
         try {
             SysRole role = new SysRole();
+            BeanUtils.copyProperties(param, role);
             role.setRoleId(roleId);
-            role.setRoleName(param.getRoleName());
-            role.setRoleDesc(param.getRoleDesc());
-            role.setAvatar(param.getAvatar());
-            role.setRoleSound(param.getRoleSound());
-            role.setVoiceName(param.getVoiceName());
-            role.setTtsPitch(param.getTtsPitch());
-            role.setTtsSpeed(param.getTtsSpeed());
-            role.setState(param.getState());
-            role.setTtsId(param.getTtsId());
-            role.setModelId(param.getModelId());
-            role.setModelName(param.getModelName());
-            role.setSttId(param.getSttId());
-            role.setTemperature(param.getTemperature());
-            role.setTopP(param.getTopP());
-            role.setVadEnergyTh(param.getVadEnergyTh());
-            role.setVadSpeechTh(param.getVadSpeechTh());
-            role.setVadSilenceTh(param.getVadSilenceTh());
-            role.setVadSilenceMs(param.getVadSilenceMs());
-            role.setModelProvider(param.getModelProvider());
-            role.setTtsProvider(param.getTtsProvider());
-            role.setIsDefault(param.getIsDefault());
-            role.setDatasetId(param.getDatasetId());
-            role.setMemoryType(param.getMemoryType());
             role.setUserId(CmsUtils.getUserId());
 
             roleService.update(role);
@@ -133,28 +112,7 @@ public class RoleController extends BaseController {
     public ResultMessage create(@Valid @RequestBody RoleAddParam param) {
         try {
             SysRole role = new SysRole();
-            role.setRoleName(param.getRoleName());
-            role.setRoleDesc(param.getRoleDesc());
-            role.setAvatar(param.getAvatar());
-            role.setRoleSound(param.getRoleSound());
-            role.setVoiceName(param.getVoiceName());
-            role.setTtsPitch(param.getTtsPitch());
-            role.setTtsSpeed(param.getTtsSpeed());
-            role.setState(param.getState());
-            role.setTtsId(param.getTtsId());
-            role.setModelId(param.getModelId());
-            role.setModelName(param.getModelName());
-            role.setSttId(param.getSttId());
-            role.setTemperature(param.getTemperature());
-            role.setTopP(param.getTopP());
-            role.setVadEnergyTh(param.getVadEnergyTh());
-            role.setVadSpeechTh(param.getVadSpeechTh());
-            role.setVadSilenceTh(param.getVadSilenceTh());
-            role.setVadSilenceMs(param.getVadSilenceMs());
-            role.setModelProvider(param.getModelProvider());
-            role.setTtsProvider(param.getTtsProvider());
-            role.setIsDefault(param.getIsDefault());
-            role.setDatasetId(param.getDatasetId());
+            BeanUtils.copyProperties(param, role);
             role.setUserId(CmsUtils.getUserId());
 
             roleService.add(role);

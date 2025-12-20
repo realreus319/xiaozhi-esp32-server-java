@@ -23,6 +23,7 @@ import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
+import org.springframework.beans.BeanUtils;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -94,22 +95,8 @@ public class ConfigController extends BaseController {
     public ResultMessage update(@PathVariable Integer configId, @Valid @RequestBody ConfigUpdateParam param) {
         try {
             SysConfig config = new SysConfig();
+            BeanUtils.copyProperties(param, config);
             config.setConfigId(configId);
-            config.setDeviceId(param.getDeviceId());
-            config.setRoleId(param.getRoleId());
-            config.setConfigName(param.getConfigName());
-            config.setConfigDesc(param.getConfigDesc());
-            config.setConfigType(param.getConfigType());
-            config.setModelType(param.getModelType());
-            config.setProvider(param.getProvider());
-            config.setAppId(param.getAppId());
-            config.setApiKey(param.getApiKey());
-            config.setApiSecret(param.getApiSecret());
-            config.setAk(param.getAk());
-            config.setSk(param.getSk());
-            config.setApiUrl(param.getApiUrl());
-            config.setState(param.getState());
-            config.setIsDefault(param.getIsDefault());
             config.setUserId(CmsUtils.getUserId());
 
             SysConfig oldSysConfig = configService.selectConfigById(config.getConfigId());
@@ -147,21 +134,7 @@ public class ConfigController extends BaseController {
     public ResultMessage create(@Valid @RequestBody ConfigAddParam param) {
         try {
             SysConfig config = new SysConfig();
-            config.setDeviceId(param.getDeviceId());
-            config.setRoleId(param.getRoleId());
-            config.setConfigName(param.getConfigName());
-            config.setConfigDesc(param.getConfigDesc());
-            config.setConfigType(param.getConfigType());
-            config.setModelType(param.getModelType());
-            config.setProvider(param.getProvider());
-            config.setAppId(param.getAppId());
-            config.setApiKey(param.getApiKey());
-            config.setApiSecret(param.getApiSecret());
-            config.setAk(param.getAk());
-            config.setSk(param.getSk());
-            config.setApiUrl(param.getApiUrl());
-            config.setState(param.getState());
-            config.setIsDefault(param.getIsDefault());
+            BeanUtils.copyProperties(param, config);
             config.setUserId(CmsUtils.getUserId());
 
             configService.add(config);
