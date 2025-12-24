@@ -28,7 +28,8 @@ const searchForm = ref({
 // 平台选项
 const providerOptions = computed<ProviderOption[]>(() => [
   { label: t('agent.coze'), value: 'coze' },
-  { label: t('agent.dify'), value: 'dify' }
+  { label: t('agent.dify'), value: 'dify' },
+  { label: t('agent.xingchen'), value: 'xingchen' }
 ])
 
 // ==================== 表格 ====================
@@ -155,8 +156,16 @@ const platformModal = useModal<PlatformConfig>({
       // 如果是编辑模式，添加configId
       if (isEdit && currentConfigId.value) {
         data.configId = currentConfigId.value
+
+        // 编辑模式下，移除空的敏感字段（留空表示保持原值）
+        const sensitiveFields: (keyof PlatformConfig)[] = ['apiKey', 'apiSecret', 'ak', 'sk']
+        sensitiveFields.forEach(field => {
+          if (!data[field]) {
+            delete data[field]
+          }
+        })
       }
-      
+
       // 调用API
       const apiFunc = isEdit ? updatePlatformConfig : addPlatformConfig
       const res = await apiFunc(data)
@@ -176,60 +185,36 @@ const platformModal = useModal<PlatformConfig>({
     }
   },
   onOpen: async (item) => {
-    loadingStore.showLoading(t('common.loading'))
-    try {
-      // 并行执行：API 请求和等待最小显示时间
-      const [res] = await Promise.all([
-        queryPlatformConfig('agent', searchForm.value.provider),
-        loadingStore.awaitMinDisplay()
-      ])
-      
-      // 此时最小时间已满足，立即处理数据
-      if (res.code === 200) {
-        const configs = (res.data as { list: PlatformConfig[] })?.list || []
-        
-        if (configs.length > 0) {
-          // 编辑模式：填充已有配置
-          const config = configs[0] as PlatformConfig
-          currentConfigId.value = config.configId ?? null
-          Object.assign(platformForm, {
-            configType: config.configType || 'agent',
-            provider: config.provider,
-            configName: config.configName || '',
-            configDesc: config.configDesc || '',
-            appId: config.appId || '',
-            apiSecret: config.apiSecret || '',
-            apiKey: config.apiKey || '',
-            apiUrl: config.apiUrl || '',
-            ak: config.ak || '',
-            sk: config.sk || ''
-          })
-        } else {
-          // 新增模式：使用默认值
-          currentConfigId.value = null
-          Object.assign(platformForm, {
-            configType: 'agent',
-            provider: searchForm.value.provider,
-            configName: '',
-            configDesc: '',
-            appId: '',
-            apiKey: '',
-            apiSecret: '',
-            apiUrl: searchForm.value.provider === 'dify' ? 'https://api.dify.ai/v1' : '',
-            ak: '',
-            sk: ''
-          })
-        }
-      } else {
-        message.error(res.message || t('common.getPlatformConfigFailed'))
-      }
-    } catch (error) {
-      // 出错时也要等待最小时间，避免闪烁
-      await loadingStore.awaitMinDisplay()
-      console.error('Error fetching platform config:', error)
-      message.error(t('common.getPlatformConfigFailed'))
-    } finally {
-      loadingStore.hideLoading()
+    if (item) {
+      // 编辑模式：填充已有配置
+      currentConfigId.value = item.configId ?? null
+      Object.assign(platformForm, {
+        configType: item.configType || 'agent',
+        provider: item.provider,
+        configName: item.configName || '',
+        configDesc: item.configDesc || '',
+        appId: item.appId || '',
+        apiSecret: item.apiSecret || '',
+        apiKey: item.apiKey || '',
+        apiUrl: item.apiUrl || '',
+        ak: item.ak || '',
+        sk: item.sk || ''
+      })
+    } else {
+      // 新增模式：使用默认值
+      currentConfigId.value = null
+      Object.assign(platformForm, {
+        configType: 'agent',
+        provider: searchForm.value.provider,
+        configName: '',
+        configDesc: '',
+        appId: '',
+        apiKey: '',
+        apiSecret: '',
+        apiUrl: searchForm.value.provider === 'dify' ? 'https://api.dify.ai/v1' : '',
+        ak: '',
+        sk: ''
+      })
     }
   }
 })
@@ -271,33 +256,118 @@ const formItems = computed<PlatformFormItems>(() => ({
       label: t('agent.apiKey'),
       placeholder: t('agent.enterApiKey')
     }
+  ],
+  xingchen: [
+    {
+      field: 'apiUrl',
+      label: t('agent.apiUrl'),
+      placeholder: t('agent.enterApiUrl'),
+      suffix: '/chat/completions'
+    },
+    {
+      field: 'apiKey',
+      label: t('agent.authCode'),
+      placeholder: t('agent.enterAuthCode')
+    },
+    {
+      field: 'apiSecret',
+      label: t('agent.flowId'),
+      placeholder: t('agent.enterFlowId')
+    }
   ]
 }))
 
 // 表单验证规则
-const platformRules = computed(() => ({
-  appId: [{ required: true, message: t('agent.enterAppId'), trigger: 'blur' }],
-  apiKey: [{ required: true, message: t('agent.enterApiKey'), trigger: 'blur' }],
-  apiSecret: [{ required: true, message: t('agent.enterSpaceId'), trigger: 'blur' }],
-  ak: [{ required: true, message: t('agent.enterPublicKey'), trigger: 'blur' }],
-  sk: [{ required: true, message: t('agent.enterPrivateKey'), trigger: 'blur' }],
-  apiUrl: [{ required: true, message: t('agent.enterApiUrl'), trigger: 'blur' }]
-}))
+const platformRules = computed(() => {
+  const isEditMode = currentConfigId.value !== null
+
+  // 敏感字段列表
+  const sensitiveFields = ['apiKey', 'apiSecret', 'ak', 'sk']
+
+  const rules: Record<string, any[]> = {}
+
+  // appId 和 apiUrl 始终必填
+  rules.appId = [{ required: true, message: t('agent.enterAppId'), trigger: 'blur' }]
+  rules.apiUrl = [{ required: true, message: t('agent.enterApiUrl'), trigger: 'blur' }]
+
+  // 敏感字段：编辑模式下不要求必填（留空则保持原值）
+  sensitiveFields.forEach(field => {
+    if (isEditMode) {
+      // 编辑模式下不要求必填
+      rules[field] = []
+    } else {
+      // 新增模式下必填
+      const messageMap: Record<string, string> = {
+        apiKey: t('agent.enterApiKey'),
+        apiSecret: t('agent.enterSpaceId'),
+        ak: t('agent.enterPublicKey'),
+        sk: t('agent.enterPrivateKey')
+      }
+      rules[field] = [{ required: true, message: messageMap[field], trigger: 'blur' }]
+    }
+  })
+
+  return rules
+})
 
 // 当前平台的表单项
 const currentFormItems = computed(() => {
   return formItems.value[searchForm.value.provider] || []
 })
 
+// 获取敏感字段的 placeholder
+function getSensitivePlaceholder(field: string, defaultPlaceholder: string): string {
+  const isEditMode = currentConfigId.value !== null
+  const sensitiveFields = ['apiKey', 'apiSecret', 'ak', 'sk']
+
+  if (isEditMode && sensitiveFields.includes(field)) {
+    return '留空则保持原值'
+  }
+
+  return defaultPlaceholder
+}
+
 // 平台配置标题
 const platformModalTitle = computed(() => {
-  const platformName = searchForm.value.provider === 'coze' ? t('agent.coze') : searchForm.value.provider === 'dify' ? t('agent.dify') : searchForm.value.provider
+  const platformMap: Record<string, string> = {
+    'coze': t('agent.coze'),
+    'dify': t('agent.dify'),
+    'xingchen': t('agent.xingchen')
+  }
+  const platformName = platformMap[searchForm.value.provider] || searchForm.value.provider
   return `${t('common.platformConfig')} - ${platformName}`
 })
 
 // 打开平台配置对话框
 const handleConfigPlatform = async () => {
-  await platformModal.openCreate()
+  loadingStore.showLoading(t('common.loading'))
+  try {
+    // 先查询是否已有配置
+    const [res] = await Promise.all([
+      queryPlatformConfig('agent', searchForm.value.provider),
+      loadingStore.awaitMinDisplay()
+    ])
+
+    if (res.code === 200) {
+      const configs = (res.data as { list: any[] })?.list || []
+
+      if (configs.length > 0) {
+        // 有配置，以编辑模式打开
+        await platformModal.openEdit(configs[0])
+      } else {
+        // 没有配置，以新增模式打开
+        await platformModal.openCreate()
+      }
+    } else {
+      message.error(res.message || t('common.getPlatformConfigFailed'))
+    }
+  } catch (error) {
+    await loadingStore.awaitMinDisplay()
+    console.error('Error fetching platform config:', error)
+    message.error(t('common.getPlatformConfigFailed'))
+  } finally {
+    loadingStore.hideLoading()
+  }
 }
 
 // 平台配置提交
@@ -452,14 +522,14 @@ fetchData()
           <a-textarea
             v-if="item.type === 'textarea'"
             v-model:value="platformForm[item.field as keyof PlatformConfig] as string"
-            :placeholder="item.placeholder"
+            :placeholder="getSensitivePlaceholder(item.field, item.placeholder)"
             :rows="4"
             :auto-size="{ minRows: 4, maxRows: 8 }"
           />
           <a-input
             v-else
             v-model:value="platformForm[item.field as keyof PlatformConfig] as string"
-            :placeholder="item.placeholder"
+            :placeholder="getSensitivePlaceholder(item.field, item.placeholder)"
           >
             <template v-if="item.suffix" #suffix>
               <span style="color: var(--ant-color-text-tertiary)">{{ item.suffix }}</span>

@@ -5,9 +5,8 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
-import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpHeaders;
@@ -15,7 +14,16 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.ObjectUtils;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.github.pagehelper.PageInfo;
@@ -23,12 +31,14 @@ import com.xiaozhi.common.web.PageFilter;
 import com.xiaozhi.common.web.ResultMessage;
 import com.xiaozhi.communication.common.ChatSession;
 import com.xiaozhi.communication.common.SessionManager;
+import com.xiaozhi.dto.param.*;
+import com.xiaozhi.dto.response.DeviceDTO;
 import com.xiaozhi.entity.SysDevice;
 import com.xiaozhi.service.SysDeviceService;
 import com.xiaozhi.utils.CmsUtils;
+import com.xiaozhi.utils.DtoConverter;
 import com.xiaozhi.utils.JsonUtil;
 
-import ch.qos.logback.core.util.StringUtil;
 import cn.dev33.satoken.annotation.SaIgnore;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -36,6 +46,7 @@ import io.swagger.v3.oas.annotations.enums.ParameterIn;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 
 /**
  * 设备管理
@@ -66,11 +77,11 @@ public class DeviceController extends BaseController {
 
     /**
      * 设备查询
-     * 
+     *
      * @param device
      * @return deviceList
      */
-    @GetMapping("/query")
+    @GetMapping("")
     @ResponseBody
     @Operation(summary = "根据条件查询设备", description = "返回设备信息列表")
     public ResultMessage query(SysDevice device, HttpServletRequest request) {
@@ -78,8 +89,12 @@ public class DeviceController extends BaseController {
             PageFilter pageFilter = initPageFilter(request);
             device.setUserId(CmsUtils.getUserId());
             List<SysDevice> deviceList = deviceService.query(device, pageFilter);
+
+            // 转换为DTO
+            List<DeviceDTO> deviceDTOList = DtoConverter.toDeviceDTOList(deviceList);
+
             ResultMessage result = ResultMessage.success();
-            result.put("data", new PageInfo<>(deviceList));
+            result.put("data", new PageInfo<>(deviceDTOList));
             return result;
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
@@ -88,17 +103,55 @@ public class DeviceController extends BaseController {
     }
 
     /**
-     * 添加设备
-     * 
-     * @param code
+     * 批量更新设备
+     *
+     * @param param 批量更新参数
+     * @return
      */
-    @PostMapping("/add")
+    @PostMapping("/batchUpdate")
     @ResponseBody
-    @Operation(summary = "添加设备", description = "返回添加结果")
-    public ResultMessage add(@Parameter(description = "设备验证码") String code) {
+    @Operation(summary = "批量更新设备", description = "批量更新多个设备的角色")
+    public ResultMessage batchUpdate(@Valid @RequestBody DeviceBatchUpdateParam param) {
+        try {
+            // 分割设备ID字符串
+            List<String> deviceIdList = Arrays.asList(param.getDeviceIds().split(","));
+            if (deviceIdList.isEmpty()) {
+                return ResultMessage.error("设备ID格式不正确");
+            }
+
+            // 获取当前用户ID
+            Integer userId = CmsUtils.getUserId();
+
+            // 调用服务批量更新
+            int successCount = deviceService.batchUpdate(
+                deviceIdList, userId, param.getRoleId());
+
+            if (successCount > 0) {
+                ResultMessage result = ResultMessage.success("成功更新" + successCount + "个设备");
+                result.put("successCount", successCount);
+                result.put("totalCount", deviceIdList.size());
+                return result;
+            } else {
+                return ResultMessage.error("更新失败，请检查设备ID是否正确");
+            }
+        } catch (Exception e) {
+            logger.error("批量更新设备失败", e);
+            return ResultMessage.error("批量更新设备失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 添加设备
+     *
+     * @param param 添加设备参数
+     */
+    @PostMapping("")
+    @ResponseBody
+    @Operation(summary = "添加设备", description = "使用设备验证码添加设备到当前用户账户")
+    public ResultMessage create(@Valid @RequestBody DeviceAddParam param) {
         try {
             SysDevice device = new SysDevice();
-            device.setCode(code);
+            device.setCode(param.getCode());
             SysDevice query = deviceService.queryVerifyCode(device);
             if (query == null) {
                 return ResultMessage.error("无效验证码");
@@ -116,7 +169,9 @@ public class DeviceController extends BaseController {
                     sessionManager.closeSession(session);
                 }
 
-                return ResultMessage.success();
+                // 返回DTO
+                SysDevice addedDevice = deviceService.selectDeviceById(deviceId);
+                return ResultMessage.success(DtoConverter.toDeviceDTO(addedDevice));
             } else {
                 return ResultMessage.error();
             }
@@ -131,18 +186,26 @@ public class DeviceController extends BaseController {
 
     /**
      * 设备信息更新
-     * 
-     * @param device
+     *
+     * @param deviceId 设备ID
+     * @param param 更新设备参数
      * @return
      */
-    @PostMapping("/update")
+    @PutMapping("/{deviceId}")
     @ResponseBody
-    @Operation(summary = "更新设备信息", description = "返回更新结果")
-    public ResultMessage update(SysDevice device) {
+    @Operation(summary = "更新设备信息", description = "更新设备名称、角色、功能列表等信息")
+    public ResultMessage update(@PathVariable String deviceId, @Valid @RequestBody DeviceUpdateParam param) {
         try {
+            SysDevice device = new SysDevice();
+            BeanUtils.copyProperties(param, device);
+            device.setDeviceId(deviceId);
             device.setUserId(CmsUtils.getUserId());
+
             deviceService.update(device);
-            return ResultMessage.success();
+
+            // 返回更新后的设备信息
+            SysDevice updatedDevice = deviceService.selectDeviceById(deviceId);
+            return ResultMessage.success(DtoConverter.toDeviceDTO(updatedDevice));
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResultMessage.error();
@@ -151,22 +214,24 @@ public class DeviceController extends BaseController {
 
     /**
      * 删除设备
-     * 
-     * @param device
+     *
+     * @param deviceId 设备ID
      * @return
      */
-    @PostMapping("/delete")
+    @DeleteMapping("/{deviceId}")
     @ResponseBody
-    @Operation(summary = "删除设备", description = "返回删除结果")
-    public ResultMessage delete(SysDevice device) {
+    @Operation(summary = "删除设备", description = "从当前用户账户中删除指定设备")
+    public ResultMessage delete(@PathVariable String deviceId) {
         try {
+            SysDevice device = new SysDevice();
+            device.setDeviceId(deviceId);
             device.setUserId(CmsUtils.getUserId());
+
             // 删除设备
             int rows = deviceService.delete(device);
 
             if (rows > 0) {
                 // 如果设备有会话，清除会话
-                String deviceId = device.getDeviceId();
                 ChatSession session = sessionManager.getSessionByDeviceId(deviceId);
                 if (session != null) {
                     sessionManager.closeSession(session);
@@ -296,19 +361,16 @@ public class DeviceController extends BaseController {
                 }
             } else {
                 // 设备已绑定，设置连接及认证信息
-                if (communicationProtocol.equals("websocket")) {
-                    // 设置WebSocket连接信息.
-                    String websocketToken = "";//deviceService.generateToken(deviceId);
-                    Map<String, Object> websocketData = new HashMap<>();
-                    websocketData.put("url", cmsUtils.getWebsocketAddress());
-                    websocketData.put("token", websocketToken);
-                    responseData.put("websocket", websocketData);
-                }
+                // 设置WebSocket连接信息.
+                String websocketToken = "";//deviceService.generateToken(deviceId);
+                Map<String, Object> websocketData = new HashMap<>();
+                websocketData.put("url", cmsUtils.getWebsocketAddress());
+                websocketData.put("token", websocketToken);
+                responseData.put("websocket", websocketData);
                 // 设备已绑定，更新设备状态和信息
                 SysDevice boundDevice = queryDevice.get(0);
                 // 保留原设备名称，更新其他信息
                 device.setDeviceName(boundDevice.getDeviceName());
-                device.setState(SysDevice.DEVICE_STATE_ONLINE);
 
                 // 更新设备信息
                 deviceService.update(device);

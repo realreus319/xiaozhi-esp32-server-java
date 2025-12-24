@@ -1,6 +1,7 @@
 package com.xiaozhi.service.impl;
 
 import com.github.pagehelper.PageHelper;
+import com.xiaozhi.common.cache.CacheHelper;
 import com.xiaozhi.common.web.PageFilter;
 import com.xiaozhi.dao.ConfigMapper;
 import com.xiaozhi.dialogue.stt.factory.SttServiceFactory;
@@ -9,22 +10,21 @@ import com.xiaozhi.dialogue.tts.factory.TtsServiceFactory;
 import com.xiaozhi.entity.SysConfig;
 import com.xiaozhi.service.SysConfigService;
 import jakarta.annotation.Resource;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 模型配置
- * 
+ *
  * @author Joey
- * 
+ *
  */
 
 @Service
@@ -43,9 +43,15 @@ public class SysConfigServiceImpl extends BaseServiceImpl implements SysConfigSe
     @Resource
     private TtsServiceFactory ttsServiceFactory;
 
+    @Resource
+    private CacheHelper cacheHelper;
+
+    @Resource
+    private CacheManager cacheManager;
+
     /**
      * 添加配置
-     * 
+     *
      * @param config
      * @return
      */
@@ -61,7 +67,7 @@ public class SysConfigServiceImpl extends BaseServiceImpl implements SysConfigSe
 
     /**
      * 修改配置
-     * 
+     *
      * @param config
      * @return
      */
@@ -91,7 +97,7 @@ public class SysConfigServiceImpl extends BaseServiceImpl implements SysConfigSe
 
     /**
      * 重置同类型同用户的默认配置
-     * 
+     *
      * @param config
      */
     private void resetDefaultConfig(SysConfig config) {
@@ -106,13 +112,13 @@ public class SysConfigServiceImpl extends BaseServiceImpl implements SysConfigSe
 
     /**
      * 查询模型
-     * 
+     *
      * @param config
      * @return
      */
     @Override
     public List<SysConfig> query(SysConfig config, PageFilter pageFilter) {
-        if(pageFilter != null){
+        if (pageFilter != null) {
             PageHelper.startPage(pageFilter.getStart(), pageFilter.getLimit());
         }
         return configMapper.query(config);
@@ -120,38 +126,70 @@ public class SysConfigServiceImpl extends BaseServiceImpl implements SysConfigSe
 
     /**
      * 查询配置
-     * 
+     *
      * @param configId 配置id
      * @return 具体的配置
      */
     @Override
-    @Cacheable(value = CACHE_NAME, key = "#configId", unless = "#result == null")
+    @Cacheable(value = CACHE_NAME, key = "#configId")
     public SysConfig selectConfigById(Integer configId) {
         return configMapper.selectConfigById(configId);
     }
 
     /**
      * 查询默认配置
+     * 使用分布式锁防止缓存击穿
      *
-     * @param modelType
+     * @param modelType 模型类型
      * @return 配置
      */
     @Override
-    @Cacheable(value = CACHE_NAME, key ="#modelType", unless = "#result == null")
     public SysConfig selectModelType(String modelType) {
-        SysConfig queryConfig = new SysConfig();
-        queryConfig.setModelType(modelType);
+        // 使用分布式锁防止缓存击穿
+        return cacheHelper.getWithLock(
+            "config:modelType:" + modelType,
+            // 从缓存获取
+            () -> {
+                Cache cache = cacheManager.getCache(CACHE_NAME);
+                if (cache != null) {
+                    Cache.ValueWrapper wrapper = cache.get(modelType);
+                    if (wrapper != null) {
+                        return (SysConfig) wrapper.get();
+                    }
+                }
+                return null;
+            },
+            // 从数据库获取
+            () -> {
+                SysConfig queryConfig = new SysConfig();
+                queryConfig.setModelType(modelType);
 
-        List<SysConfig> modelConfigs = configMapper.query(queryConfig);
+                List<SysConfig> modelConfigs = configMapper.query(queryConfig);
 
-        for (SysConfig config : modelConfigs) {
-            if ("1".equals(config.getIsDefault())) {
-                return config;  // 找到默认配置就返回
+                SysConfig result = null;
+                for (SysConfig config : modelConfigs) {
+                    if ("1".equals(config.getIsDefault())) {
+                        result = config;  // 找到默认配置
+                        break;
+                    }
+                }
+
+                // 没有默认配置，返回第一个
+                if (result == null && !modelConfigs.isEmpty()) {
+                    result = modelConfigs.getFirst();
+                }
+
+                // 手动写入缓存
+                if (result != null) {
+                    Cache cache = cacheManager.getCache(CACHE_NAME);
+                    if (cache != null) {
+                        cache.put(modelType, result);
+                    }
+                }
+
+                return result;
             }
-        }
-
-        // 没有默认配置，返回第一个即可
-        return modelConfigs.isEmpty() ? null : modelConfigs.getFirst();
+        );
     }
 
 }

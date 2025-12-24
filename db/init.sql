@@ -104,15 +104,16 @@ CREATE TABLE `xiaozhi`.`sys_role` (
   `ttsId` int DEFAULT NULL COMMENT 'TTS服务ID',
   `modelId` int unsigned DEFAULT NULL COMMENT '模型ID',
   `sttId` int unsigned DEFAULT NULL COMMENT 'STT服务ID',
-  `temperature` DOUBLE DEFAULT 0.7 COMMENT '温度参数，控制输出的随机性',
-  `topP` DOUBLE DEFAULT 0.9 COMMENT 'Top-P参数，控制输出的多样性',
   `vadSpeechTh` FLOAT DEFAULT 0.5 COMMENT '语音检测阈值',
   `vadSilenceTh` FLOAT DEFAULT 0.3 COMMENT '静音检测阈值',
   `vadEnergyTh` FLOAT DEFAULT 0.01 COMMENT '能量检测阈值',
-  `vadSilenceMs` INT DEFAULT 1200 COMMENT '静音检测时间',
+  `vadSilenceMs` INT DEFAULT 800 COMMENT '静音检测时间',
   `voiceName` varchar(100) NOT NULL COMMENT '角色语音名称',
   `ttsPitch` FLOAT DEFAULT 1.0 COMMENT '语音音调',
   `ttsSpeed` FLOAT DEFAULT 1.0 COMMENT '语音语速',
+  `temperature` DOUBLE DEFAULT 0.7 COMMENT '温度参数',
+  `topP` DOUBLE DEFAULT 1.0 COMMENT 'Top-P参数',
+  `memoryType` enum('window') DEFAULT 'window' COMMENT '记忆类型',
   `state` enum('1','0') DEFAULT '1' COMMENT '状态：1-启用，0-禁用',
   `isDefault` enum('1','0') DEFAULT '0' COMMENT '是否默认角色：1-是，0-否',
   `userId` int NOT NULL COMMENT '创建人',
@@ -287,7 +288,6 @@ CREATE TABLE `xiaozhi`.`sys_role_permission` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_role_permission` (`roleId`,`permissionId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色-权限关联表';
-
 
 -- 插入菜单权限
 INSERT INTO `xiaozhi`.`sys_permission` (`parentId`, `name`, `permissionKey`, `permissionType`, `path`, `component`, `icon`, `sort`, `visible`, `status`) VALUES

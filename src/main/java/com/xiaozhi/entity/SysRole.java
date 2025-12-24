@@ -11,7 +11,7 @@ import lombok.experimental.Accessors;
  * 角色配置实体类
  *
  * @author Joey
- * 
+ * @since 1.0
  */
 @Data
 @Accessors(chain = true)
@@ -30,6 +30,12 @@ public class SysRole extends Base<SysRole> {
      */
     @Schema(description = "角色头像")
     private String avatar;
+
+    /**
+     * 角色音效
+     */
+    @Schema(description = "角色音效")
+    private String roleSound;
 
     /**
      * 角色名称
@@ -150,4 +156,16 @@ public class SysRole extends Base<SysRole> {
      */
     @Schema(description = "总设备数")
     private Integer totalDevice;
+
+    /**
+     * 知识库ID
+     */
+    @Schema(description = "知识库ID")
+    private String datasetId ;
+
+    /**
+     * 记忆类型
+     */
+    @Schema(description = "记忆类型")
+    private String memoryType;
 }

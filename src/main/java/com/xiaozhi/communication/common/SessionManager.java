@@ -60,7 +60,7 @@ public class SessionManager {
     @Value("${check.inactive.session:true}")
     private boolean checkInactiveSession;
 
-    @Value("${inactive.timeout.seconds:60}")
+    @Value("${inactive.timeout.seconds:20}")
     private int inactiveTimeOutSeconds;
 
     private DialogueService getDialogueService() {
@@ -119,15 +119,15 @@ public class SessionManager {
         Thread.startVirtualThread(() -> {
             Instant now = Instant.now();
             sessions.values().forEach(session -> {
-                if(session instanceof  WebSocketSession || session.isAudioChannelOpen()) {
+                if(session instanceof  WebSocketSession) {
                     Instant lastActivity = session.getLastActivityTime();
                     if (lastActivity != null) {
                         Duration inactiveDuration = Duration.between(lastActivity, now);
                         if (inactiveDuration.getSeconds() > inactiveTimeOutSeconds) {
-                            logger.info("会话 {} 已经 {} 秒没有有效活动，自动关闭",
+                            logger.info("会话 {} 已经 {} 秒没有有效活动，发送超时提示并自动关闭",
                                     session.getSessionId(), inactiveDuration.getSeconds());
                             DialogueService dialogueService = getDialogueService();
-                            dialogueService.sendGoodbyeMessage(session);
+                            dialogueService.sendTimeoutMessage(session);
                         }
                     }
                 }
@@ -194,12 +194,8 @@ public class SessionManager {
         try {
             if(chatSession instanceof WebSocketSession){
                 removeSession(chatSession.getSessionId());
-            }
-            // 关闭会话
-            if(chatSession.isAudioChannelOpen()){
+                // 先关闭WebSocket连接
                 chatSession.close();
-                applicationContext.publishEvent(new ChatSessionCloseEvent(chatSession));
-                logger.info("会话已关闭 - SessionId: {} SessionType: {}", chatSession.getSessionId(), chatSession.getClass().getSimpleName());
             }
             // 清理音频流
             Sinks.Many<byte[]> sink = chatSession.getAudioSinks();
@@ -308,7 +304,6 @@ public class SessionManager {
                 .orElse(null);
     }
 
-
     /**
      * 获取设备配置
      *
@@ -378,18 +373,6 @@ public class SessionManager {
         return false;
     }
 
-    /**
-     * 播放状态
-     *
-     * @param sessionId 会话ID
-     * @param isPlaying 是否正在说话
-     */
-    public void setPlaying(String sessionId, boolean isPlaying) {
-        ChatSession chatSession = sessions.get(sessionId);
-        if (chatSession != null) {
-            chatSession.setPlaying(isPlaying);
-        }
-    }
 
     /**
      * 是否在播放音乐

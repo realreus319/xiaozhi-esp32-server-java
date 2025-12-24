@@ -2,9 +2,12 @@ package com.xiaozhi.dialogue.stt.factory;
 
 import com.xiaozhi.dialogue.stt.SttService;
 import com.xiaozhi.dialogue.stt.providers.*;
+import com.xiaozhi.dialogue.token.TokenService;
+import com.xiaozhi.dialogue.token.factory.TokenServiceFactory;
 import com.xiaozhi.entity.SysConfig;
 
 import jakarta.annotation.Nonnull;
+import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -18,6 +21,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SttServiceFactory {
 
     private static final Logger logger = LoggerFactory.getLogger(SttServiceFactory.class);
+    
+    @Resource
+    private TokenServiceFactory tokenServiceFactory;
 
     // 缓存已初始化的服务：key format: "provider:configId"
     private final Map<String, SttService> serviceCache = new ConcurrentHashMap<>();
@@ -114,6 +120,11 @@ public class SttServiceFactory {
         return switch (config.getProvider()) {
             case "tencent" -> new TencentSttService(config);
             case "aliyun" -> new AliyunSttService(config);
+            case "aliyun-nls" -> {
+                // 为NLS创建阿里云Token服务
+                TokenService aliyunTokenService = tokenServiceFactory.getTokenService(config);
+                yield new AliyunNlsSttService(config, aliyunTokenService);
+            }
             case "funasr" -> new FunASRSttService(config);
             case "xfyun" -> new XfyunSttService(config);
             default -> {

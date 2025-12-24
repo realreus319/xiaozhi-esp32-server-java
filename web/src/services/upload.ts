@@ -1,4 +1,5 @@
 import api from './api'
+import { useUserStore } from '@/store/user'
 
 export interface UploadResponse {
   code: number
@@ -18,7 +19,7 @@ export interface UploadOptions {
 /**
  * 通用文件上传方法
  * @param file 要上传的文件
- * @param type 文件类型: avatar 等
+ * @param type 文件类型: avatar, firmware, voiceClone, knowledge 等
  * @param options 上传配置选项
  * @returns 默认返回URL，fullResponse=true时返回完整响应
  */
@@ -33,7 +34,16 @@ export function uploadFile(
     formData.append('type', type)
 
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', api.upload, true)
+    // 使用完整的 API URL，避免相对路径解析到前端域名
+    const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+    const uploadUrl = baseURL ? `${baseURL}/file/upload` : api.upload
+    xhr.open('POST', uploadUrl, true)
+
+    // 添加认证 token（使用 Bearer 格式）
+    const userStore = useUserStore()
+    if (userStore.token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${userStore.token}`)
+    }
 
     if (options?.onProgress) {
       xhr.upload.onprogress = (event) => {

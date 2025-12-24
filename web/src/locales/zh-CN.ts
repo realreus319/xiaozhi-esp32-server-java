@@ -30,6 +30,7 @@ export default {
     total: '共',
     items: '条',
     all: '全部',
+    or: '或',
     export: '导出数据',
     import: '导入数据',
     download: '下载',
@@ -70,6 +71,7 @@ export default {
     successMessage: '操作成功',
     errorMessage: '操作失败',
     loadDataFailed: '加载数据失败',
+    customize: '自定义',
     // 通用字段
     avatar: '头像',
     name: '名称',
@@ -93,6 +95,8 @@ export default {
     // 文件上传验证
     onlyImageFiles: '只能上传图片文件!',
     imageSizeLimit: '图片大小不能超过2MB!',
+    audioFormatError: '只能上传音频文件（WAV、MP3、M4A、FLAC、OGG）!',
+    audioSizeError: '音频文件大小不能超过10MB!',
     // 通用提示
     setDefaultSuccess: '已将"{name}"设为默认',
     setDefaultFailed: '设置默认失败',
@@ -138,10 +142,7 @@ export default {
     audioPathInvalid: '音频路径无效',
     audioTestFailed: '音频测试失败',
     audioGenerateFailed: '音频生成失败',
-    audioNotGenerated: '音频未生成',
     audioUploadFailed: '音频上传失败',
-    audioFormatError: '只能上传WAV或MP3格式的音频文件',
-    audioSizeError: '音频文件不能超过10MB',
     audioProcessFailed: '处理音频失败',
   },
 
@@ -293,6 +294,10 @@ export default {
     bindRole: '绑定角色',
     confirmClearMemory: '确定要清除该设备的所有对话记忆吗？此操作不可恢复。',
     clearMemory: '清除记忆',
+    clearingMemory: '正在清除记忆...',
+    memoryType: '记忆类型',
+    windowMemory: '短期记忆',
+    allMemory: '全部记忆',
   },
 
   role: {
@@ -337,15 +342,16 @@ export default {
     voiceSynthesisSettings: '语音合成设置',
     selectVoice: '请选择音色',
     voiceSynthesisAdvanced: '语音合成高级设置',
-    voiceSpeed: '语速',
-    voiceSpeedTip: '控制语音播放速度，范围0.5-2.0，默认1.0（0.5=慢速，1.0=正常，2.0=快速）',
-    voicePitch: '音调',
-    voicePitchTip: '控制语音音调高低，范围0.5-2.0，默认1.0（0.5=低音，1.0=正常，2.0=高音）',
+    voiceSpeed: '语音语速',
+    voiceSpeedTip: '控制语音播放速度，范围0.5-2.0，默认1.0',
+    voicePitch: '语音音调',
+    voicePitchTip: '控制语音音调高低，范围0.5-2.0，默认1.0',
+    selectProvider: '选择提供商',
     
     // 角色提示词
     rolePrompt: '角色提示词(Prompt)',
     agentPrompt: '智能体模式下使用智能体自带的提示词，无需额外设置',
-    agentPromptDesc: '智能体已包含预设的提示词，将自动使用智能体的描述作为角色提示词',
+    agentPromptDesc: '智能体已包含预设的提示词和知识库，将自动使用智能体的描述作为角色提示词',
     useTemplate: '使用模板',
     custom: '自定义',
     selectTemplate: '选择模板',
@@ -372,7 +378,16 @@ export default {
     loadTemplateFailed: '加载模板列表失败',
     voskLocalRecognition: 'Vosk本地识别',
     unknownModel: '未知模型',
-    voiceTestMessage: '您好，我是您的语音助手，很高兴为您服务'
+    voiceTestMessage: '您好，我是您的语音助手，很高兴为您服务',
+    
+    // 记忆类型配置
+    memoryTypeSettings: '记忆类型配置',
+    memoryTypeLabel: '记忆类型',
+    selectMemoryType: '请选择记忆类型',
+    memoryTypeTip: '选择该角色使用的记忆类型，不同记忆类型有不同的存储和召回机制',
+
+    // 记忆管理
+    memory: '记忆',
   },
 
   template: {
@@ -467,20 +482,25 @@ export default {
       agentDesc: '智能体描述',
       publishTime: '发布时间',
       botId: '智能体ID',
-      coze: 'Coze',
-      dify: 'Dify',
+      coze: 'Coze(www.coze.cn)',
+      dify: 'Dify(dify.ai)',
+      xingchen: 'XingChen(agent.xfyun.cn)',
       appId: 'App ID',
       spaceId: 'Space ID',
       publicKey: '公钥',
       privateKey: '私钥',
       apiUrl: 'API URL',
       apiKey: 'API Key',
+      authCode: '授权码',
+      flowId: 'FlowId',
       enterAppId: '请输入Coze App ID',
       enterSpaceId: '请输入Coze Space ID',
       enterPublicKey: '请输入公钥',
       enterPrivateKey: '请输入私钥',
       enterApiUrl: '请输入API URL',
       enterApiKey: '请输入API Key',
+      enterAuthCode: '拼接API Key:API Secret',
+      enterFlowId: '请输入FlowId',
       enterAgentName: '请输入智能体名称',
     },
 
@@ -707,4 +727,10 @@ export default {
     },
   },
 
+  memory: {
+    chat: '聊天记录',
+    content: '内容',
+    confirmDelete: '确定要删除该记忆吗？此操作不可恢复。',
+  },
 }
+

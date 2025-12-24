@@ -114,7 +114,8 @@ public class AliyunSttService implements SttService {
                         .timeout(90, TimeUnit.SECONDS)
                         .subscribe(result -> {
                                     if (result.isSentenceEnd()) {
-                                        logger.info("语音识别结果({}): {}", modelName, result.getSentence().getText());
+                                        logger.info("Paraformer语音识别结果 - RequestId: {}, Text: {}",
+                                                result.getRequestId(), result.getSentence().getText());
                                         sink.next(result.getSentence().getText());
                                     }
                                 },
@@ -152,17 +153,18 @@ public class AliyunSttService implements SttService {
                 .build();
         
         // 初始化回调接口
-        ResultCallback<TranslationRecognizerResult> callback = 
+        ResultCallback<TranslationRecognizerResult> callback =
                 new ResultCallback<TranslationRecognizerResult>() {
                     @Override
                     public void onEvent(TranslationRecognizerResult recognizerResult) {
                         try {
-                            
+
                             // 处理识别结果
                             if (recognizerResult.getTranscriptionResult() != null) {
                                 if (recognizerResult.isSentenceEnd()) {
                                     String text = recognizerResult.getTranscriptionResult().getText();
-                                    logger.info("语音识别结果({}): {}", model, text);
+                                    logger.info("Gummy语音识别结果 - RequestId: {}, Text: {}",
+                                            recognizerResult.getRequestId(), text);
                                     synchronized (result) {
                                         result.append(text);
                                     }
@@ -180,7 +182,7 @@ public class AliyunSttService implements SttService {
 
                     @Override
                     public void onError(Exception e) {
-                        logger.error("语音识别错误({}): {}", model, e.getMessage(), e);
+                        logger.error("Gummy语音识别错误: {}", e.getMessage(), e);
                         hasError.set(true);
                         latch.countDown();
                     }
@@ -266,12 +268,22 @@ public class AliyunSttService implements SttService {
                 @Override
                 public void onEvent(JsonObject message) {
                     String type = message.get("type").getAsString();
+                    // 尝试获取 request_id 或 event_id
+                    String eventId = message.has("event_id") ? message.get("event_id").getAsString() : null;
+
                     switch(type) {
                         case "session.created":
+                            if (eventId != null) {
+                                logger.info("Qwen会话已创建 - EventId: {}", eventId);
+                            }
                             break;
                         case "conversation.item.input_audio_transcription.completed":
                             String transcript = message.get("transcript").getAsString();
-                            logger.info("语音识别结果({}): {}", model, transcript);
+                            if (eventId != null) {
+                                logger.info("Qwen语音识别结果 - EventId: {}, Text: {}", eventId, transcript);
+                            } else {
+                                logger.info("Qwen语音识别结果 - Text: {}", transcript);
+                            }
                             synchronized (result) {
                                 result.append(transcript);
                             }
@@ -304,7 +316,7 @@ public class AliyunSttService implements SttService {
 
                 @Override
                 public void onClose(int code, String reason) {
-                    logger.info("Qwen 语音识别连接关闭 - code: {}, reason: {}", code, reason);
+                    logger.info("Qwen语音识别连接已关闭 - Code: {}, Reason: {}", code, reason);
                     if (isCompleted.compareAndSet(false, true)) {
                         latch.countDown();
                     }

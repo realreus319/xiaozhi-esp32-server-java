@@ -32,11 +32,19 @@ public interface SysRoleService {
 
   /**
    * 更新角色信息
-   * 
+   *
    * @param role
    * @return
    */
   int update(SysRole role);
+
+  /**
+   * 删除角色
+   *
+   * @param roleId
+   * @return
+   */
+  int deleteById(Integer roleId);
 
   SysRole selectRoleById(Integer roleId);
 

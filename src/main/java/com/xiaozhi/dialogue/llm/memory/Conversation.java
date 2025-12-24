@@ -3,14 +3,20 @@ package com.xiaozhi.dialogue.llm.memory;
 import com.xiaozhi.entity.SysDevice;
 import com.xiaozhi.entity.SysMessage;
 import com.xiaozhi.entity.SysRole;
-import org.springframework.ai.chat.messages.AssistantMessage;
-import org.springframework.ai.chat.messages.Message;
-import org.springframework.ai.chat.messages.MessageType;
-import org.springframework.ai.chat.messages.UserMessage;
+import lombok.Getter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.messages.*;
 import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static java.time.temporal.ChronoField.*;
 
 /**
  * Conversation 是一个 对应于 sys_message 表的，但高于 sys_message 的一个抽象实体。
@@ -20,16 +26,32 @@ import java.util.stream.Collectors;
  * deviceID与roleID本质上不是Conversation的真正属性，而是外键，代表连接的2个对象。
  * 只有sessionID是真正挂在Conversation的属性。
  *
+ * Conversation 也不再负责消息的存储持久化，将其改为由ChatModel的ObservationHandler处理。
+ *
  */
 public class Conversation{
+    private static final Logger logger = LoggerFactory.getLogger(Conversation.class);
     public static final String MESSAGE_TYPE_ASSISTANT = "assistant";
     public static final String MESSAGE_TYPE_USER = "user";
+    public static final AssistantMessage ROLLBACK_MESSAGE = new AssistantMessage("rollback");
     // device, role, sessionId 唯一确定一个Conversation,as key,通过final保持全程的不变性(immutable)
     private final SysDevice device;
+    @Getter
     private final SysRole role;
     private final String sessionId;
 
     protected List<Message> messages = new ArrayList<>();
+    public static final DateTimeFormatter LOCAL_DATE_TIME = new DateTimeFormatterBuilder()
+            .parseCaseInsensitive()
+            .append(DateTimeFormatter.ISO_LOCAL_DATE)
+            .appendLiteral('T')
+            .appendValue(HOUR_OF_DAY, 2)
+            .appendLiteral(':')
+            .appendValue(MINUTE_OF_HOUR, 2)
+            .optionalStart()
+            .appendLiteral(':')
+            .appendValue(SECOND_OF_MINUTE, 2)
+            .toFormatter();
 
     public Conversation(SysDevice device, SysRole role, String sessionId) {
         // final 属性的规范要求
@@ -53,6 +75,32 @@ public class Conversation{
     public String sessionId() {
         return sessionId;
     }
+
+    public Optional<SystemMessage> roleSystemMessage() {
+        // 角色描述是在运行过程中不变的，作为第一条系统消息。
+        String roleDesc = role().getRoleDesc();
+        // 添加设备地址信息到系统提示词中
+        String deviceLocation = device().getLocation();
+
+        StringBuilder msgBuilder = new StringBuilder();
+        if(StringUtils.hasText(roleDesc)) {
+            msgBuilder.append( "角色描述：" ).append(roleDesc).append(System.lineSeparator());
+        }
+        if (StringUtils.hasText(deviceLocation)) {
+            msgBuilder.append("当前位置：").append(deviceLocation)
+                    .append("。如果用户提及现在在哪里，则以新地方为准。")
+                    .append(System.lineSeparator());
+        }
+        msgBuilder.append("当前时间：").append(LocalDateTime.now().format(LOCAL_DATE_TIME));
+        if(StringUtils.hasText(roleDesc)) {
+            var roleMessage = new SystemMessage(msgBuilder.toString());
+            return Optional.of(roleMessage);
+        }else{
+            return Optional.empty();
+        }
+    }
+
+
     /**
      * 当前Conversation的多轮消息列表。
      */
@@ -69,9 +117,27 @@ public class Conversation{
         messages.clear();
     }
 
-    public void add(Message message, Long timeMillis){
+    public void add(Message message, Long timeMillis) {
+
         ChatMemory.setTimeMillis(message, timeMillis);
-        messages.add(message);
+
+        if(message instanceof UserMessage userMsg){
+            messages.add(userMsg);
+            return;
+        }
+
+        if(message instanceof AssistantMessage assistantMessage){
+
+            if (assistantMessage == Conversation.ROLLBACK_MESSAGE) {
+                if (!messages.isEmpty()) {
+                    messages.removeLast();
+                }
+                return;
+            }
+
+            // 2. 更新缓存
+            messages.add(assistantMessage);
+        }
     }
 
     /**
@@ -93,10 +159,11 @@ public class Conversation{
                     Map<String, Object> metadata = Map.of("messageId", message.getMessageId(), "messageType",
                             message.getMessageType());
                     return switch (role) {
-                        case MESSAGE_TYPE_ASSISTANT -> new AssistantMessage(message.getMessage(), metadata);
+                        case MESSAGE_TYPE_ASSISTANT -> AssistantMessage.builder().content(message.getMessage()).properties(metadata).build();
                         case MESSAGE_TYPE_USER -> UserMessage.builder().text(message.getMessage()).metadata(metadata).build();
                         default -> throw new IllegalArgumentException("Invalid role: " + role);
                     };
                 }).collect(Collectors.toList());
     }
+
 }

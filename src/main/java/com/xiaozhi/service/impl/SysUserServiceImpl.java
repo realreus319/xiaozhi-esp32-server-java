@@ -6,6 +6,7 @@ import com.xiaozhi.common.exception.UsernameNotFoundException;
 import com.xiaozhi.common.web.PageFilter;
 import com.xiaozhi.dao.ConfigMapper;
 import com.xiaozhi.dao.DeviceMapper;
+import com.xiaozhi.dao.MessageMapper;
 import com.xiaozhi.dao.RoleMapper;
 import com.xiaozhi.dao.TemplateMapper;
 import com.xiaozhi.dao.UserMapper;
@@ -20,6 +21,9 @@ import com.xiaozhi.utils.EmailUtils;
 import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
+import org.springframework.cache.annotation.Caching;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.ObjectUtils;
@@ -39,11 +43,15 @@ import java.util.List;
 public class SysUserServiceImpl extends BaseServiceImpl implements SysUserService {
 
     private static final Logger logger = LoggerFactory.getLogger(SysUserServiceImpl.class);
+    private static final String CACHE_NAME = "XiaoZhi:SysUser";
     private static final String dayOfMonthStart = DateUtils.dayOfMonthStart();
     private static final String dayOfMonthEnd = DateUtils.dayOfMonthEnd();
 
     @Resource
     private UserMapper userMapper;
+
+    @Resource
+    private MessageMapper messageMapper;
 
     @Resource
     private ConfigMapper configMapper;
@@ -109,26 +117,31 @@ public class SysUserServiceImpl extends BaseServiceImpl implements SysUserServic
     }
 
     @Override
+    @Cacheable(value = CACHE_NAME, key = "#userId")
     public SysUser selectUserByUserId(Integer userId) {
         return userMapper.selectUserByUserId(userId);
     }
 
     @Override
+    @Cacheable(value = CACHE_NAME, key = "'username:' + #username")
     public SysUser selectUserByUsername(String username) {
         return userMapper.selectUserByUsername(username);
     }
 
     @Override
+    @Cacheable(value = CACHE_NAME, key = "'wxOpenId:' + #wxOpenId")
     public SysUser selectUserByWxOpenId(String wxOpenId) {
         return userMapper.selectUserByWxOpenId(wxOpenId);
     }
 
     @Override
+    @Cacheable(value = CACHE_NAME, key = "'email:' + #email")
     public SysUser selectUserByEmail(String email) {
         return userMapper.selectUserByEmail(email);
     }
 
     @Override
+    @Cacheable(value = CACHE_NAME, key = "'tel:' + #tel")
     public SysUser selectUserByTel(String tel) {
         return userMapper.selectUserByTel(tel);
     }
@@ -192,12 +205,20 @@ public class SysUserServiceImpl extends BaseServiceImpl implements SysUserServic
 
     /**
      * 用户信息更改
-     * 
+     * 清除该用户的所有缓存
+     *
      * @param user
      * @return
      */
     @Override
     @Transactional
+    @Caching(evict = {
+        @CacheEvict(value = CACHE_NAME, key = "#user.userId", condition = "#user.userId != null"),
+        @CacheEvict(value = CACHE_NAME, key = "'username:' + #user.username", condition = "#user.username != null"),
+        @CacheEvict(value = CACHE_NAME, key = "'email:' + #user.email", condition = "#user.email != null"),
+        @CacheEvict(value = CACHE_NAME, key = "'tel:' + #user.tel", condition = "#user.tel != null"),
+        @CacheEvict(value = CACHE_NAME, key = "'wxOpenId:' + #user.wxOpenId", condition = "#user.wxOpenId != null")
+    })
     public int update(SysUser user) {
         return userMapper.update(user);
     }

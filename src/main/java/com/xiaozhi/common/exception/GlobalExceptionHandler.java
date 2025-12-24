@@ -64,7 +64,6 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NotLoginException.class)
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     public ResultMessage handleNotLoginException(NotLoginException e, WebRequest request) {
-        logger.warn("用户未登录或token已失效: {}", e.getMessage());
         return ResultMessage.error(HttpStatus.UNAUTHORIZED.value(), "登录已过期，请重新登录");
     }
 

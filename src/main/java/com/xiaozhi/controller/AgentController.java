@@ -3,23 +3,30 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.beans.BeanUtils;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.xiaozhi.common.web.ResultMessage;
+import com.xiaozhi.dto.param.AgentAddParam;
+import com.xiaozhi.dto.param.AgentUpdateParam;
+import com.xiaozhi.dto.response.AgentDTO;
 import com.xiaozhi.entity.SysAgent;
 import com.xiaozhi.service.SysAgentService;
 import com.xiaozhi.utils.CmsUtils;
+import com.xiaozhi.utils.DtoConverter;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
+import jakarta.validation.Valid;
 
 /**
  * 智能体管理
@@ -35,46 +42,49 @@ public class AgentController extends BaseController {
 
     /**
      * 查询智能体列表
-     * 
+     *
      * @param agent 查询条件
      * @return 智能体列表
      */
-    @GetMapping("/query")
+    @GetMapping("")
     @ResponseBody
     @Operation(summary = "根据条件查询智能体", description = "返回智能体列表信息，会自动查询Coze和Dify当前存在智能体并更新本地数据库信息")
-    public ResultMessage query(@io.swagger.v3.oas.annotations.parameters.RequestBody(
-            description = "智能体信息",
-            content = @Content(schema = @Schema(implementation = SysAgent.class))) SysAgent agent) {
+    public ResultMessage list(SysAgent agent) {
         try {
             List<SysAgent> sysAgents = agentService.query(agent);
+
+            // 转换为DTO
+            List<AgentDTO> agentDTOList = DtoConverter.toAgentDTOList(sysAgents);
+
             Map<String, Object> data = new HashMap<>();
-            data.put("list", sysAgents);
-            data.put("total", sysAgents.size());
+            data.put("list", agentDTOList);
+            data.put("total", agentDTOList.size());
             return ResultMessage.success(data);
         }catch (Exception e){
-            logger.error("查询智能体列表失败", e.getMessage());
+            logger.error("查询智能体列表失败", e);
             return ResultMessage.error(e.getMessage());
         }
     }
 
     /**
      * 添加智能体
-     * 
-     * @param agent    智能体信息
+     *
+     * @param param 智能体信息
      * @return 添加结果
      */
-    @PostMapping("/add")
+    @PostMapping("")
     @ResponseBody
-    @Operation(summary = "添加智能体", description = "返回添加结果")
-    public ResultMessage add(@io.swagger.v3.oas.annotations.parameters.RequestBody(
-            description = "智能体信息",
-            content = @Content(schema = @Schema(implementation = SysAgent.class)))
-        @RequestBody SysAgent agent) {
+    @Operation(summary = "添加智能体", description = "添加新的Coze或Dify智能体配置")
+    public ResultMessage create(@Valid @RequestBody AgentAddParam param) {
         try {
-
+            SysAgent agent = new SysAgent();
+            BeanUtils.copyProperties(param, agent);
             agent.setUserId(CmsUtils.getUserId());
+
             agentService.add(agent);
-            return ResultMessage.success();
+
+            // 返回新增的智能体信息(不包含敏感字段)
+            return ResultMessage.success(DtoConverter.toAgentDTO(agent));
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResultMessage.error("添加智能体失败");
@@ -83,20 +93,24 @@ public class AgentController extends BaseController {
 
     /**
      * 更新智能体
-     * 
-     * @param agent 智能体信息
+     *
+     * @param agentId 智能体ID
+     * @param param 智能体信息
      * @return 更新结果
      */
-    @PostMapping("/update")
+    @PutMapping("/{agentId}")
     @ResponseBody
-    @Operation(summary = "更新智能体", description = "返回更新结果")
-    public ResultMessage update(@io.swagger.v3.oas.annotations.parameters.RequestBody(
-            description = "智能体信息",
-            content = @Content(schema = @Schema(implementation = SysAgent.class)))
-        @RequestBody SysAgent agent) {
+    @Operation(summary = "更新智能体", description = "更新智能体配置信息")
+    public ResultMessage update(@PathVariable Integer agentId, @Valid @RequestBody AgentUpdateParam param) {
         try {
+            SysAgent agent = new SysAgent();
+            BeanUtils.copyProperties(param, agent);
+            agent.setAgentId(agentId);
+
             agentService.update(agent);
-            return ResultMessage.success();
+
+            // 返回更新成功消息（AgentService没有selectById方法）
+            return ResultMessage.success("更新成功");
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResultMessage.error("更新智能体失败");
@@ -105,20 +119,17 @@ public class AgentController extends BaseController {
 
     /**
      * 删除智能体
-     * 
-     * @param agent 智能体信息
+     *
+     * @param agentId 智能体ID
      * @return 删除结果
      */
-    @PostMapping("/delete")
+    @DeleteMapping("/{agentId}")
     @ResponseBody
-    @Operation(summary = "删除智能体", description = "返回删除结果")
-    public ResultMessage delete(@io.swagger.v3.oas.annotations.parameters.RequestBody(
-            description = "智能体信息",
-            content = @Content(schema = @Schema(implementation = SysAgent.class)))
-        @RequestBody SysAgent agent) {
+    @Operation(summary = "删除智能体", description = "删除指定的智能体配置")
+    public ResultMessage delete(@PathVariable Integer agentId) {
         try {
-            agentService.delete(agent.getAgentId());
-            return ResultMessage.success();
+            agentService.delete(agentId);
+            return ResultMessage.success("删除成功");
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResultMessage.error("删除智能体失败");

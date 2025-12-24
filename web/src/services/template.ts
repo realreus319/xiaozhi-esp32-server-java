@@ -7,23 +7,19 @@ export function queryTemplates(params: Partial<TemplateQuery>) {
 }
 
 export function addTemplate(data: Partial<PromptTemplate>) {
-  return http.post(api.template.add, data)
+  return http.postJSON(api.template.add, data)
 }
 
 export function updateTemplate(data: Partial<PromptTemplate>) {
-  return http.post(api.template.update, data)
+  return http.putJSON(`${api.template.update}/${data.templateId}`, data)
 }
 
 export function deleteTemplate(templateId: number) {
-  return http.post(api.template.update, {
-    templateId,
-    state: '0'
-  })
+  return http.deleteJSON(`${api.template.delete}/${templateId}`)
 }
 
 export function setDefaultTemplate(templateId: number) {
-  return http.post(api.template.update, {
-    templateId,
+  return http.putJSON(`${api.template.update}/${templateId}`, {
     isDefault: 1
   })
 }

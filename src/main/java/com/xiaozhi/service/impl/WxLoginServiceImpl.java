@@ -2,8 +2,6 @@ package com.xiaozhi.service.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xiaozhi.service.WxLoginService;
-import com.xiaozhi.utils.HttpUtil;
-import com.xiaozhi.utils.JsonUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;

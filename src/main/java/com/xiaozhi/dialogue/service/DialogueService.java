@@ -3,7 +3,9 @@ package com.xiaozhi.dialogue.service;
 import com.xiaozhi.communication.common.ChatSession;
 import com.xiaozhi.communication.common.SessionManager;
 import com.xiaozhi.dialogue.llm.ChatService;
-import com.xiaozhi.dialogue.llm.memory.Conversation;
+import com.xiaozhi.dialogue.llm.intent.IntentDetector;
+import com.xiaozhi.dialogue.llm.intent.IntentDetector.UserIntent;
+import com.xiaozhi.dialogue.llm.memory.*;
 import com.xiaozhi.dialogue.service.VadService.VadStatus;
 import com.xiaozhi.dialogue.stt.SttService;
 import com.xiaozhi.dialogue.stt.factory.SttServiceFactory;
@@ -14,14 +16,14 @@ import com.xiaozhi.entity.SysDevice;
 import com.xiaozhi.entity.SysRole;
 import com.xiaozhi.event.ChatAbortEvent;
 import com.xiaozhi.event.ChatSessionCloseEvent;
-import com.xiaozhi.service.SysConfigService;
-import com.xiaozhi.service.SysMessageService;
-import com.xiaozhi.service.SysRoleService;
+import com.xiaozhi.service.*;
+
 import com.xiaozhi.utils.AudioUtils;
-import com.xiaozhi.utils.EmojiUtils;
-import com.xiaozhi.utils.EmojiUtils.EmoSentence;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.messages.MessageType;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.ApplicationContext;
 import org.springframework.stereotype.Service;
@@ -29,27 +31,21 @@ import org.springframework.util.Assert;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 
-import java.nio.file.Files;
 import jakarta.annotation.Resource;
+import reactor.core.publisher.Flux;
+
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.text.DecimalFormat;
 import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 /**
  * 对话处理服务
  * 负责处理语音识别和对话生成的业务逻辑
+ * 由于DialogueService 是无状态的，未来可以考虑拆分得更细一些，真正的面向对象编程（状态与过程封装）。
  */
 @Service
 public class DialogueService{
     private static final Logger logger = LoggerFactory.getLogger(DialogueService.class);
-    private static final DecimalFormat df = new DecimalFormat("0.000");
-    private static final long TIMEOUT_MS = 5000;
     
     // 从配置文件读取TTS相关参数
     @Value("${tts.timeout.ms:10000}")
@@ -71,9 +67,6 @@ public class DialogueService{
     private ChatService chatService;
 
     @Resource
-    private AudioService audioService;
-
-    @Resource
     private TtsServiceFactory ttsFactory;
 
     @Resource
@@ -81,12 +74,6 @@ public class DialogueService{
 
     @Resource
     private MessageService messageService;
-
-    @Resource
-    private MusicService musicService;
-
-    @Resource
-    private HuiBenService huiBenService;
 
     @Resource
     private VadService vadService;
@@ -103,34 +90,20 @@ public class DialogueService{
     @Resource
     private SysRoleService roleService;
 
-    // 会话状态管理
-    private final Map<String, AtomicInteger> seqCounters = new ConcurrentHashMap<>();
-    private final Map<String, Long> sttStartTimes = new ConcurrentHashMap<>();
-    private final Map<String, Long> llmStartTimes = new ConcurrentHashMap<>();
-    private final Map<String, CopyOnWriteArrayList<Sentence>> sentenceQueue = new ConcurrentHashMap<>();
-    private final Map<String, AtomicBoolean> firstSentDone = new ConcurrentHashMap<>();
-    private final Map<String, ReentrantLock> locks = new ConcurrentHashMap<>();
+    @Resource
+    private IntentDetector intentDetector;
 
-    // 存储每个对话ID的所有模型回复音频路径
-    private final Map<Long, Map<Integer, String>> dialogueAudioPaths = new ConcurrentHashMap<>();
-    // 存储每个对话ID的完整文本回复
-    private final Map<Long, StringBuilder> dialogueResponses = new ConcurrentHashMap<>();
+    @Resource
+    private GoodbyeMessageSupplier goodbyeMessages;
 
-    // 新增：并发控制相关
-    private final Map<String, Semaphore> sessionSemaphores = new ConcurrentHashMap<>();
-    private final Map<String, PriorityBlockingQueue<TtsTask>> sessionTaskQueues = new ConcurrentHashMap<>();
+    @Resource
+    private TimeoutMessageSupplier timeoutMessages;
 
     @org.springframework.context.event.EventListener
     public void onApplicationEvent(ChatSessionCloseEvent event) {
         ChatSession chatSession = event.getSession();
         if(chatSession != null) {
-            // clean up dialogue audio paths and responses
-            Long assistantTimeMillis = chatSession.getAssistantTimeMillis();
-            if (assistantTimeMillis!=null ) {
-                dialogueAudioPaths.remove(assistantTimeMillis);
-                dialogueResponses.remove(assistantTimeMillis);
-            }
-            cleanupSession(chatSession.getSessionId());
+            cleanupSession(chatSession);
         }
     }
 
@@ -142,171 +115,6 @@ public class DialogueService{
     }
 
     /**
-     * 句子对象，用于跟踪每个句子的处理状态
-     */
-    public static class Sentence {
-        private int seq;
-        private final String text;
-        private boolean isFirst;
-        private boolean isLast;
-        private boolean ready = false;
-        private String audioPath = null;
-        private long timestamp = System.currentTimeMillis();
-        private double modelResponseTime = 0.0; // 模型响应时间（秒）
-        private double ttsGenerationTime = 0.0; // TTS生成时间（秒）
-        private Long assistantTimeMillis = null; // 对话ID
-        private List<String> moods;
-        // TODO 看看是否真的需要这么多个构造方法。
-        public Sentence(String text) {
-            this.text = text;
-        }
-
-        public Sentence(String text, String audioPath) {
-            this.text = text;
-            this.audioPath = audioPath;
-        }
-
-        public Sentence(int seq, String text, boolean isFirst, boolean isLast) {
-            this.seq = seq;
-            this.text = text;
-            this.isFirst = isFirst;
-            this.isLast = isLast;
-        }
-
-        public void setAudio(String path) {
-            this.audioPath = path;
-            this.ready = true;
-        }
-
-        public boolean isReady() {
-            return ready;
-        }
-
-        public boolean isTimeout() {
-            return System.currentTimeMillis() - timestamp > TIMEOUT_MS;
-        }
-
-        public int getSeq() {
-            return seq;
-        }
-
-        public String getText() {
-            return text;
-        }
-
-        public boolean isFirst() {
-            return isFirst;
-        }
-
-        public boolean isLast() {
-            return isLast;
-        }
-
-        public String getAudioPath() {
-            return audioPath;
-        }
-
-        public void setModelResponseTime(double time) {
-            this.modelResponseTime = time;
-        }
-
-        public double getModelResponseTime() {
-            return modelResponseTime;
-        }
-
-        public void setTtsGenerationTime(double time) {
-            this.ttsGenerationTime = time;
-        }
-
-        public double getTtsGenerationTime() {
-            return ttsGenerationTime;
-        }
-
-        public void setAssistantTimeMillis(Long assistantTimeMillis) {
-            this.assistantTimeMillis = assistantTimeMillis;
-        }
-
-        public Long getAssistantTimeMillis() {
-            return assistantTimeMillis;
-        }
-
-        public List<String> getMoods() {
-            return moods;
-        }
-
-        public void setMoods(List<String> moods) {
-            this.moods = moods;
-        }
-    }
-
-    /**
-     * TTS任务封装，用于优先队列
-     */
-    private static class TtsTask implements Comparable<TtsTask> {
-        private final String sessionId;
-        private final Sentence sentence;
-        private final EmoSentence emoSentence;
-        private final boolean isFirst;
-        private final boolean isLast;
-        private final SysConfig ttsConfig;
-        private final String voiceName;
-        private final Float ttsPitch;
-        private final Float ttsSpeed;
-        private final ChatSession session;
-        private final long createTime;
-        private int retryCount = 0;
-        private boolean isRetry = false;
-
-        public TtsTask(ChatSession session, String sessionId, Sentence sentence,
-                EmoSentence emoSentence, boolean isFirst, boolean isLast,
-                SysConfig ttsConfig, String voiceName, Float ttsPitch, Float ttsSpeed) {
-            this.session = session;
-            this.sessionId = sessionId;
-            this.sentence = sentence;
-            this.emoSentence = emoSentence;
-            this.isFirst = isFirst;
-            this.isLast = isLast;
-            this.ttsConfig = ttsConfig;
-            this.voiceName = voiceName;
-            this.ttsPitch = ttsPitch;
-            this.ttsSpeed = ttsSpeed;
-            this.createTime = System.currentTimeMillis();
-        }
-
-        @Override
-        public int compareTo(TtsTask other) {
-            // 优先级：重试任务 > 首句 > 序号小的句子
-            if (this.isRetry != other.isRetry) {
-                return this.isRetry ? -1 : 1;
-            }
-            if (this.isFirst != other.isFirst) {
-                return this.isFirst ? -1 : 1;
-            }
-            return Integer.compare(this.sentence.getSeq(), other.sentence.getSeq());
-        }
-
-        public String getSessionId() {
-            return this.sessionId;
-        }
-    }
-
-    /**
-     * 获取或创建session的信号量
-     */
-    private Semaphore getSessionSemaphore(String sessionId) {
-        return sessionSemaphores.computeIfAbsent(sessionId,
-                k -> new Semaphore(MAX_CONCURRENT_PER_SESSION));
-    }
-
-    /**
-     * 获取或创建session的任务队列
-     */
-    private PriorityBlockingQueue<TtsTask> getSessionTaskQueue(String sessionId) {
-        return sessionTaskQueues.computeIfAbsent(sessionId,
-                k -> new PriorityBlockingQueue<>());
-    }
-
-    /**
      * 处理音频数据
      */
     public void processAudioData(ChatSession session, byte[] opusData) {
@@ -314,8 +122,14 @@ public class DialogueService{
             return;
         }
         String sessionId = session.getSessionId();
+        
         try {
-            
+            // 如果正在唤醒响应中,忽略音频数据,避免被唤醒词误触发VAD
+            // 如果会话标记为即将关闭,忽略音频数据,避免在播放告别语时触发新的对话
+            if (session.isInWakeupResponse() || session.isCloseAfterChat()) {
+                return;
+            }
+
             SysDevice device = session.getSysDevice();
             // 如果设备未注册或未绑定，忽略音频数据
             if (device == null || ObjectUtils.isEmpty(device.getRoleId())) {
@@ -339,13 +153,11 @@ public class DialogueService{
             switch (vadResult.getStatus()) {
                 case SPEECH_START:
                     // 检测到语音开始
-                    sttStartTimes.put(sessionId, System.currentTimeMillis());
-                    if(isDialog(sessionId)){
+
+                    if(session.getSynthesizer()!=null && session.getSynthesizer().isDialog()){
                         //检测到vad，触发当前语音打断事件
                         applicationContext.publishEvent(new ChatAbortEvent(session, "检测到vad"));
                     }
-                    // 初始化对话状态
-                    initChat(sessionId);
                     startStt(session, sessionId, sttConfig, device, vadResult.getProcessedData());
                     break;
 
@@ -382,14 +194,9 @@ public class DialogueService{
             SysDevice device,
             byte[] initialAudio) {
         Assert.notNull(session, "session不能为空");
+
         Thread.startVirtualThread(() -> {
             try {
-                // 如果正在播放，先中断音频
-                if (audioService.isPlaying(sessionId)) {
-                    sentenceQueue.get(sessionId).clear();
-                    audioService.sendStop(session);
-                }
-
                 // 如果已经在进行流式识别，先清理旧的资源
                 sessionManager.closeAudioStream(sessionId);
 
@@ -409,10 +216,6 @@ public class DialogueService{
                     sessionManager.sendAudioData(sessionId, initialAudio);
                 }
 
-                // 设置用户收到音频的时间戳作为用户消息的创建时间戳，也用于约定保存音频文件的路径。一定要在STT前获得时间戳。
-                final Long userTimeMillis =  System.currentTimeMillis();
-                session.setUserTimeMillis(userTimeMillis);
-
                 final String finalText;
                 if (sessionManager.getAudioStream(sessionId) != null) {
                     finalText = sttService.streamRecognition(sessionManager.getAudioStream(sessionId));
@@ -422,32 +225,31 @@ public class DialogueService{
                 } else {
                     return;
                 }
+                messageService.sendSttMessage(session, finalText);
 
-                llmStartTimes.put(sessionId, System.currentTimeMillis());
+                // 立即发送start消息，通知设备进入说话状态，避免在LLM处理期间错误监听环境声音
+                messageService.sendTtsMessage(session, null, "start");
 
-                CompletableFuture.runAsync(() -> messageService.sendSttMessage(session, finalText))
-                        .thenRun(() -> audioService.sendStart(session))
-                        .thenRun(() -> {
-                            // 设置LLM生成消息的时间戳作为Assistant消息的创建时间戳，也用于约定保存音频文件的路径。一定要在LLM前设置时间戳。
-                            final Long assistantTimeMillis =  System.currentTimeMillis();
-                            session.setAssistantTimeMillis(assistantTimeMillis);
-                            // 初始化当前对话的音频路径映射和文本响应
-                            dialogueAudioPaths.put(assistantTimeMillis, new ConcurrentHashMap<>());
-                            dialogueResponses.put(assistantTimeMillis, new StringBuilder());
-                            // 使用句子切分处理响应
-                            chatService.chatStreamBySentence(session, finalText, true,
-                                    (sentence, isFirst, isLast) -> {
-                                        handleSentence(
-                                                session,
-                                                sentence,
-                                                isFirst,
-                                                isLast);
-                                    });
-                        })
-                        .exceptionally(e -> {
-                            logger.error("处理对话失败: {}", e.getMessage(), e);
-                            return null;
-                        });
+                // 获取当前语音活动的PCM数据
+                List<byte[]> pcmFrames = vadService.getPcmData(session.getSessionId());
+                UserMessage userMessage = saveUserAudio(session, pcmFrames, finalText);
+
+                // 设置LLM生成消息的时间戳作为Assistant消息的创建时间戳，也用于约定保存音频文件的路径。一定要在LLM前设置时间戳。
+                final Long assistantTimeMillis =  System.currentTimeMillis();
+                session.setAssistantTimeMillis(assistantTimeMillis);
+
+                // 优先检测用户意图，如果检测到明确意图则直接处理，不走 LLM
+                UserIntent intent = intentDetector.detectIntent(finalText);
+                if (intent != null) {
+                    handleIntent(session, intent, finalText);
+                    return;
+                }
+
+                boolean useFunctionCall = true;
+                Flux<ChatResponse> chatResponseFlux =chatService.chatStream(session, userMessage, useFunctionCall);
+                // 初始化对话状态
+                Synthesizer synthesizer = initSynthesizer(session);
+                synthesizer.startSynthesis(chatResponseFlux);
             } catch (Exception e) {
                 logger.error("流式识别错误: {}", e.getMessage(), e);
             }
@@ -457,11 +259,13 @@ public class DialogueService{
     /**
      * 保存用户音频数据
      */
-    private void saveUserAudio(ChatSession session) {
-        try {
-            // 获取当前语音活动的PCM数据
-            List<byte[]> pcmFrames = vadService.getPcmData(session.getSessionId());
+    private UserMessage saveUserAudio(ChatSession session, List<byte[]> pcmFrames, String finalText) {
 
+
+            // 设置用户收到音频的时间戳作为用户消息的创建时间戳，也用于约定保存音频文件的路径。
+            final Long userTimeMillis =  System.currentTimeMillis();
+            UserMessage userMessage = new UserMessage(finalText);
+            userMessage.getMetadata().put(ChatMemory.TIME_MILLIS_KEY,userTimeMillis);
             if (pcmFrames != null && !pcmFrames.isEmpty()) {
                 // 计算总大小并合并PCM帧
                 int totalSize = pcmFrames.stream().mapToInt(frame -> frame.length).sum();
@@ -472,521 +276,51 @@ public class DialogueService{
                     System.arraycopy(frame, 0, fullPcmData, offset, frame.length);
                     offset += frame.length;
                 }
-
+                try {
                 // 保存为WAV文件
-                Path path = session.getUserAudioPath();
+                Path path = session.getAudioPath(MessageType.USER.getValue(), userTimeMillis);
                 AudioUtils.saveAsWav(path,fullPcmData);
                 logger.debug("用户音频已保存: {}", path.toString());
-                //更新消息表路径、时长信息
-                String deviceId = session.getSysDevice().getDeviceId().replace("-", ":");
-                Integer roleId = session.getSysDevice().getRoleId();
-                String fileName = path.getFileName().toString();
-                String createTime = fileName.substring(0, fileName.indexOf("-" + Conversation.MESSAGE_TYPE_USER));
-                sysMessageService.updateMessageByAudioFile(deviceId, roleId,
-                        Conversation.MESSAGE_TYPE_USER, createTime, path.toString());
+
+                userMessage.getMetadata().put(ChatMemory.AUDIO_PATH,path);
+                } catch (Exception e) {
+                    logger.error("保存用户音频失败: {}", e.getMessage(), e);
+                }
             }
-        } catch (Exception e) {
-            logger.error("保存用户音频失败: {}", e.getMessage(), e);
-        }
+            return userMessage;
     }
 
     /**
      * 初始化对话状态
      */
-    private void initChat(String sessionId) {
-        llmStartTimes.put(sessionId, System.currentTimeMillis());
-        seqCounters.putIfAbsent(sessionId, new AtomicInteger(0));
-        sentenceQueue.putIfAbsent(sessionId, new CopyOnWriteArrayList<>());
-        firstSentDone.put(sessionId, new AtomicBoolean(false));
-        locks.putIfAbsent(sessionId, new ReentrantLock());
-    }
+    private Synthesizer initSynthesizer(ChatSession chatSession) {
 
-    /**
-     * 处理LLM返回的句子
-     * 使用虚拟线程处理TTS生成
-     */
-    public void handleSentence(
-            ChatSession session,
-            String text,
-            boolean isFirst,
-            boolean isLast) {
-        Assert.notNull(session, "session cannot be null");
-        Long assistantTimeMillis = session.getAssistantTimeMillis();
-        Assert.notNull(assistantTimeMillis, "assistantTimeMillis cannot be null");
-        String sessionId = session.getSessionId();
-        seqCounters.putIfAbsent(sessionId, new AtomicInteger(0));
-        // 获取句子序列号
-        int seq = seqCounters.get(sessionId).incrementAndGet();
-
-        // 耗时操作需及时更新最后活动时间，避免误判为会话终止
-        sessionManager.updateLastActivity(sessionId);
-
-        // 累加完整回复内容
-        if (text != null && !text.isEmpty()) {
-            // 同时累加到对话ID对应的响应中
-            dialogueResponses.computeIfAbsent(assistantTimeMillis, k -> new StringBuilder()).append(text);
-        }
-
-        // 计算模型响应时间
-        final long responseTime;
-        Long startTime = llmStartTimes.get(sessionId);
-        if (startTime != null) {
-            long currentTime = System.currentTimeMillis();
-            responseTime = (currentTime - startTime);
-            llmStartTimes.put(sessionId, currentTime); // 更新开始时间
-        } else {
-            responseTime = 0;
-        }
-
-        SysDevice device = session.getSysDevice();
+        SysDevice device = chatSession.getSysDevice();
+        Assert.notNull(device, "device cannot be null");
         SysRole role = roleService.selectRoleById(device.getRoleId());
-        if (device == null || role == null) {
-            return;
-        }
-
+        Assert.notNull(role, "role cannot be null");
         // 新增加的设备很有可能没有配置TTS，采用默认Edge需要传递null
-        final SysConfig ttsConfig;
+        SysConfig ttsConfig = null;
         if (role.getTtsId() != null) {
             ttsConfig = configService.selectConfigById(role.getTtsId());
-        } else {
-            ttsConfig = null;
         }
-        String voiceName = role.getVoiceName();
+        TtsService ttsService = ttsFactory.getTtsService(ttsConfig, role.getVoiceName(), role.getTtsPitch(), role.getTtsSpeed());
 
-        // 处理表情符号
-        EmoSentence emoSentence = EmojiUtils.processSentence(text);
-
-        // 检查处理后的文本是否为空（即只有表情符号）
-        if (emoSentence.getTtsSentence() == null || emoSentence.getTtsSentence().trim().isEmpty()) {
-            // 如果只有表情符号，直接标记为准备好但不生成音频
-            logger.info("跳过纯表情符号TTS处理 - 序号: {}, 内容: \"{}\"", seq, text);
-            
-            // 创建句子对象
-            Sentence sentence = new Sentence(seq, text, isFirst, isLast);
-            sentence.setModelResponseTime(responseTime / 1000.0);
-            sentence.setAssistantTimeMillis(assistantTimeMillis);
-            sentence.setAudio(null);
-            sentence.setTtsGenerationTime(0);
-            sentence.setMoods(emoSentence.getMoods());
-
-            // 添加到句子队列
-            CopyOnWriteArrayList<Sentence> queue = sentenceQueue.get(sessionId);
-            if (queue != null) {
-                queue.add(sentence);
-            }
-
-            // 如果是首句，需要标记首句处理完成
-            if (isFirst) {
-                firstSentDone.get(sessionId).set(true);
-            }
-
-            // 尝试处理队列
-            processQueue(session, sessionId);
-            return;
-        }
-
-        // 创建句子对象
-        Sentence sentence = new Sentence(seq, text, isFirst, isLast);
-        sentence.setModelResponseTime(responseTime / 1000.0); // 记录模型响应时间
-        sentence.setAssistantTimeMillis(assistantTimeMillis); // 设置对话ID
-
-        logger.info("处理LLM返回的句子: seq={}, text={}, isFirst={}, isLast={}, responseTime={}s", seq, text, isFirst, isLast, responseTime/1000);
-
-        // 添加到句子队列
-        CopyOnWriteArrayList<Sentence> queue = sentenceQueue.get(sessionId);
-        if (queue == null) {return;}
-        queue.add(sentence);
-
-        // 如果句子为空且是结束状态，直接标记为准备好（不需要生成音频）
-        if ((text == null || text.isEmpty()) && isLast) {
-            sentence.setAudio(null);
-            sentence.setTtsGenerationTime(0); // 设置TTS生成时间为0
-
-            // 如果是首句，需要标记首句处理完成
-            if (isFirst) {
-                firstSentDone.get(sessionId).set(true);
-            }
-
-            // 尝试处理队列
-            processQueue(session, sessionId);
-            return;
-        }
-
-        // 使用虚拟线程异步生成音频文件
-        Thread.startVirtualThread(() -> {
-            generateAudio(session, sessionId, sentence, emoSentence, isFirst, isLast, ttsConfig, voiceName, role.getTtsPitch(), role.getTtsSpeed());
-        });
+        return initFileSynthesizer(chatSession, ttsService);
     }
 
     /**
-     * 生成音频并处理
+     * 初始化Synthesizer
      */
-    private void generateAudio(
-            ChatSession session,
-            String sessionId,
-            Sentence sentence,
-            EmoSentence emoSentence,
-            boolean isFirst,
-            boolean isLast,
-            SysConfig ttsConfig,
-            String voiceName,
-            Float ttsPitch,
-            Float ttsSpeed) {
-
-        // 创建TTS任务
-        TtsTask task = new TtsTask(session, sessionId, sentence, emoSentence,
-                isFirst, isLast, ttsConfig, voiceName, ttsPitch, ttsSpeed);
-
-        // 提交任务到队列
-        submitTtsTask(task);
-    }
-
-    /**
-     * 提交TTS任务
-     */
-    private void submitTtsTask(TtsTask task) {
-        PriorityBlockingQueue<TtsTask> taskQueue = getSessionTaskQueue(task.sessionId);
-        taskQueue.offer(task);
-
-        // 尝试处理队列中的任务
-        processTtsTaskQueue(task.sessionId);
-    }
-
-    /**
-     * 处理TTS任务队列
-     */
-    private void processTtsTaskQueue(String sessionId) {
-        Thread.startVirtualThread(() -> {
-            PriorityBlockingQueue<TtsTask> taskQueue = getSessionTaskQueue(sessionId);
-            Semaphore semaphore = getSessionSemaphore(sessionId);
-
-            while (!taskQueue.isEmpty()) {
-                // 耗时操作需及时更新最后活动时间，避免误判为会话终止
-                sessionManager.updateLastActivity(sessionId);
-
-                // 尝试获取许可
-                if (!semaphore.tryAcquire()) {
-                    // 无法获取许可，等待其他任务完成
-                    break;
-                }
-
-                TtsTask task = taskQueue.poll();
-                if (task == null) {
-                    semaphore.release();
-                    break;
-                }
-
-                // 使用虚拟线程执行任务
-                Thread.startVirtualThread(() -> {
-                    try {
-                        executeTtsTask(task);
-                    } finally {
-                        semaphore.release();
-                        // 任务完成后，继续处理队列
-                        processTtsTaskQueue(sessionId);
-                    }
-                });
-            }
-        });
-    }
-
-    /**
-     * 执行TTS任务（带超时和重试）
-     */
-    private void executeTtsTask(TtsTask task) {
-        CompletableFuture<String> future = CompletableFuture.supplyAsync(() -> {
-            try {
-                long ttsStartTime = System.currentTimeMillis();
-                String audioPath = ttsFactory.getTtsService(task.ttsConfig, task.voiceName, task.ttsPitch, task.ttsSpeed)
-                        .textToSpeech(task.emoSentence.getTtsSentence());
-                long ttsDuration = System.currentTimeMillis() - ttsStartTime;
-
-                // 记录TTS生成时间
-                task.sentence.setTtsGenerationTime(ttsDuration / 1000.0);
-                return audioPath;
-            } catch (Exception e) {
-                throw new CompletionException(e);
-            }
-        }, Thread::startVirtualThread);
-
-        try {
-            // 耗时操作需及时更新最后活动时间，避免误判为会话终止
-            sessionManager.updateLastActivity(task.getSessionId());
-
-            // 设置超时
-            String audioPath = future.get(TTS_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-
-            // 成功生成音频
-            handleTtsSuccess(task, audioPath);
-        } catch (TimeoutException e) {
-            // logger.warn("TTS生成超时 - 序号: {}, 重试次数: {}/{}, 内容: \"{}\"",
-            //         task.sentence.getSeq(), task.retryCount, MAX_RETRY_COUNT, task.sentence.getText());
-            handleTtsFailure(task, "超时");
-        } catch (Exception e) {
-            // logger.error("TTS生成失败 - 序号: {}, 重试次数: {}/{}, 错误: {}",
-            //         task.sentence.getSeq(), task.retryCount, MAX_RETRY_COUNT, e.getMessage());
-            handleTtsFailure(task, e.getMessage());
+    private Synthesizer initFileSynthesizer(ChatSession chatSession, TtsService ttsService) {
+        Player player = chatSession.getPlayer();
+        if(player == null){
+            player = new FilePlayer( chatSession, messageService, sessionManager, sysMessageService);
+            chatSession.setPlayer(player);
         }
-    }
-
-    /**
-     * 处理TTS成功
-     */
-    private void handleTtsSuccess(TtsTask task, String audioPath) {
-        // 记录心情
-        task.sentence.setMoods(task.emoSentence.getMoods());
-
-        // 耗时操作需及时更新最后活动时间，避免误判为会话终止
-        sessionManager.updateLastActivity(task.getSessionId());
-        
-        // 如果是首句，设置TTS响应时间
-        if (task.isFirst) {
-            int ttsResponseTime = (int) (task.sentence.getTtsGenerationTime() * 1000);
-            task.session.getAttributes().put(ChatSession.ATTR_FIRST_TTS_RESPONSE_TIME, ttsResponseTime);
-            logger.info("TTS首句响应时间 - SessionId: {}, 响应时间: {}秒",
-                    task.sessionId, df.format(task.sentence.getTtsGenerationTime()));
-        }
-        
-        // 记录日志
-        logger.info("句子音频生成完成 - 序号: {}, 对话ID: {}, 模型响应: {}秒, 语音生成: {}秒, 内容: \"{}\"",
-                task.sentence.getSeq(), task.sentence.getAssistantTimeMillis(),
-                df.format(task.sentence.getModelResponseTime()),
-                df.format(task.sentence.getTtsGenerationTime()),
-                task.sentence.getText());
-
-        // 标记音频准备就绪
-        task.sentence.setAudio(audioPath);
-
-        // 如果有对话ID，将音频路径添加到对应的映射中
-        if (task.sentence.getAssistantTimeMillis() != null && audioPath != null) {
-            dialogueAudioPaths.computeIfAbsent(task.sentence.getAssistantTimeMillis(), k -> new ConcurrentHashMap<>())
-                    .put(task.sentence.getSeq(), audioPath);
-        }
-
-        // 如果是首句，需要标记首句处理完成
-        if (task.isFirst) {
-            
-            if(firstSentDone.get(task.sessionId) != null) {
-                firstSentDone.get(task.sessionId).set(true);
-            } else {
-                logger.error("会话 {} 已经被删除，无法标记首句处理完成。", task.sessionId);
-            }
-        }
-
-        // 尝试处理队列
-        AtomicBoolean firstDone = firstSentDone.get(task.sessionId);
-        if (firstDone != null && firstDone.get()) {
-            processQueue(task.session, task.sessionId);
-        }
-    }
-
-    /**
-     * 处理TTS失败
-     */
-    private void handleTtsFailure(TtsTask task, String reason) {
-        task.retryCount++;
-
-        // 耗时操作需及时更新最后活动时间，避免服务端误判为会话终止
-        sessionManager.updateLastActivity(task.getSessionId());
-        // 异常或失败，发送类似心跳包，避免设备端误判为会话终止
-        messageService.sendEmotion(task.session, "happy");
-
-        if (task.retryCount <= MAX_RETRY_COUNT) {
-            // 创建新的任务对象而不是重用原对象，避免数据污染
-            TtsTask retryTask = new TtsTask(
-                task.session, 
-                task.sessionId, 
-                task.sentence, 
-                task.emoSentence, 
-                task.isFirst, 
-                task.isLast, 
-                task.ttsConfig, 
-                task.voiceName,
-                task.ttsPitch,
-                task.ttsSpeed
-            );
-            retryTask.retryCount = task.retryCount;
-            retryTask.isRetry = true;
-            
-            logger.info("TTS任务重试 - 序号: {}, 重试次数: {}/{}, 内容: \"{}\", 原因: {}",
-                    task.sentence.getSeq(), task.retryCount, MAX_RETRY_COUNT, task.sentence.getText(), reason);
-
-            // 延迟后重试
-            CompletableFuture.delayedExecutor(TTS_RETRY_DELAY_MS * task.retryCount, TimeUnit.MILLISECONDS)
-                    .execute(() -> submitTtsTask(retryTask));
-        } else {
-            // 超过最大重试次数，标记为失败
-            logger.error("TTS任务失败 - 序号: {}, 重试次数: {}/{}, 已达最大重试次数, 原因: {}",
-                    task.sentence.getSeq(), task.retryCount, MAX_RETRY_COUNT, reason);
-
-            // 即使失败也标记为准备好，以便队列继续处理
-            task.sentence.setAudio(null);
-            task.sentence.setTtsGenerationTime(0);
-
-            // 如果是首句，设置TTS响应时间（失败时设为0）
-            if (task.isFirst) {
-                task.session.getAttributes().put(ChatSession.ATTR_FIRST_TTS_RESPONSE_TIME, 0);
-                logger.info("TTS首句响应时间（失败） - SessionId: {}, 响应时间: 0秒", task.sessionId);
-            }
-
-            // 如果是首句，需要标记首句处理完成
-            if (task.isFirst) {
-                if(firstSentDone.get(task.sessionId) != null) {
-                    firstSentDone.get(task.sessionId).set(true);
-                } else {
-                    logger.error("会话 {} 已经被删除，无法标记首句处理完成。", task.sessionId);
-                }
-            }
-
-            // 尝试处理队列
-            if(firstSentDone.get(task.sessionId) != null ) {
-                if (firstSentDone.get(task.sessionId).get()) {
-                    processQueue(task.session, task.sessionId);
-                }
-            } else {
-                logger.error("会话 {} 已经被删除，无法处理队列。", task.sessionId);
-            }
-        }
-    }
-
-    /**
-     * 保存助手的完整响应（文本和合并音频）
-     */
-    private void saveAssistantResponse(ChatSession session) {
-
-        Long assistantTimeMillis = session.getAssistantTimeMillis();
-        try {
-            // 获取该对话的所有音频路径
-            Map<Integer, String> audioPaths = dialogueAudioPaths.get(assistantTimeMillis);
-            if (audioPaths == null || audioPaths.isEmpty()) {
-                logger.warn("对话 {} 没有可用的音频路径", assistantTimeMillis);
-                return;
-            }
-
-            // 保存ai音频文件前保存用户音频
-            saveUserAudio(session);
-
-            // 按序号排序音频路径
-            List<Integer> sortedSeqs = new ArrayList<>(audioPaths.keySet());
-            sortedSeqs.sort(Integer::compareTo);
-
-            // 准备要合并的音频文件路径
-            List<String> audioFilesToMerge = new ArrayList<>();
-            for (Integer seq : sortedSeqs) {
-                String path = audioPaths.get(seq);
-                if (path != null) {
-                    audioFilesToMerge.add(path);
-                    // 查看下文件是否存在
-                    if(!Files.exists(Paths.get(path))){
-                        logger.error("音频文件不存在: {}", path);
-                    }
-                }
-            }
-            // DEBUG: dialogueAudioPaths 里的文件已经合并过了，而且片段文件已删除。这里出现了二次合并。
-            // 合并音频文件
-            if (!audioFilesToMerge.isEmpty()) {
-                Path path = session.getAssistantAudioPath();
-                // 这里可能只有一条音频，合并可能会报错，尝试输出所有合并音频的路径
-                logger.info("合并音频文件数量: {}", audioFilesToMerge.size());
-                AudioUtils.mergeAudioFiles(path,audioFilesToMerge);
-                // 保存合并后的音频路径
-                logger.info("对话 {} 的音频已合并: {}", assistantTimeMillis, path);
-                // 音频合并完成，删除源文件后，dialogueAudioPaths也应一并清除。
-                dialogueAudioPaths.remove(assistantTimeMillis);
-                //合并完成，更新消息表路径、时长信息
-                String deviceId = session.getSysDevice().getDeviceId().replace("-", ":");
-                Integer roleId = session.getSysDevice().getRoleId();
-                String fileName = path.getFileName().toString();
-                String createTime = fileName.substring(0, fileName.indexOf("-" + Conversation.MESSAGE_TYPE_ASSISTANT));
-                sysMessageService.updateMessageByAudioFile(deviceId, roleId,
-                        Conversation.MESSAGE_TYPE_ASSISTANT, createTime, path.toString());
-            }
-        } catch (Exception e) {
-            logger.error("保存助手响应失败 - 对话ID: {}, 错误: {}", assistantTimeMillis, e.getMessage(), e);
-        }
-    }
-
-    /**
-     * 处理音频队列
-     * 在流式处理完成后或非首句音频生成完成后调用
-     */
-    private void processQueue(ChatSession session, String sessionId) {
-        // 获取锁，确保线程安全
-        ReentrantLock lock = locks.get(sessionId);
-        if (lock == null) {
-            return;
-        }
-
-        // 尝试获取锁，避免多线程同时处理
-        if (!lock.tryLock()) {
-            return;
-        }
-
-        try {
-            // 获取句子队列
-            CopyOnWriteArrayList<Sentence> queue = sentenceQueue.get(sessionId);
-            if (queue == null || queue.isEmpty()) {
-                return;
-            }
-
-            // 检查首句是否已经流式处理完成
-            AtomicBoolean firstDone = firstSentDone.get(sessionId);
-            if (firstDone == null || !firstDone.get()) {
-                // 首句尚未处理完成，等待
-                return;
-            }
-
-            // 检查当前是否有句子正在播放
-            boolean isCurrentlyPlaying = audioService.isPlaying(sessionId);
-
-            // 如果当前正在播放，不处理下一个句子
-            if (isCurrentlyPlaying) {
-                return;
-            }
-
-            // 找出最小序号
-            int minSeq = queue.stream()
-                    .mapToInt(Sentence::getSeq)
-                    .min()
-                    .orElse(Integer.MAX_VALUE);
-
-            // 找出该序号的句子
-            Sentence nextSentence = queue.stream()
-                    .filter(s -> s.getSeq() == minSeq)
-                    .findFirst()
-                    .orElse(null);
-
-            if (nextSentence != null) {
-                // 检查句子是否准备好或超时
-                if (nextSentence.isReady() || nextSentence.isTimeout()) {
-                    // 如果句子超时但未准备好，标记为准备好但没有音频
-                    if (nextSentence.isTimeout() && !nextSentence.isReady()) {
-                        nextSentence.setAudio(null);
-                    }
-
-                    // 从队列中移除已处理的句子
-                    queue.remove(nextSentence);
-
-                    // 发送到客户端
-                    audioService.sendAudioMessage(
-                            session,
-                            nextSentence,
-                            false, // 不是开始消息
-                            nextSentence.isLast() // 如果是最后一句，则是结束消息
-                    ).thenRun(() -> {
-                        // 在播放完成后，递归调用处理下一个句子
-                        processQueue(session, sessionId);
-                    });
-                }
-                //logger.info("是否最后一个句子{}, 对话ID: {}",nextSentence.isLast, nextSentence.assistantTimeMillis);
-                // 如果是最后一个句子，合并并存储助手的完整音频
-                if (nextSentence.isLast() && nextSentence.getAssistantTimeMillis() != null) {
-                    saveAssistantResponse(session);
-                }
-            }
-        } finally {
-            lock.unlock();
-        }
+        FileSynthesizer synthesizer = new FileSynthesizer(chatSession, messageService, ttsService, player);
+        chatSession.setSynthesizer(synthesizer);
+        return synthesizer;
     }
 
     /**
@@ -995,28 +329,66 @@ public class DialogueService{
     public void handleWakeWord(ChatSession session, String text) {
         logger.info("检测到唤醒词: \"{}\"", text);
         try {
-            String sessionId = session.getSessionId();
-            SysDevice device = sessionManager.getDeviceConfig(sessionId);
+            // 设置唤醒响应状态,在响应期间忽略VAD检测
+            session.setInWakeupResponse(true);
+
+            SysDevice device = session.getSysDevice();
             if (device == null) {
                 return;
             }
 
-            handleText(session, text, dialogueId -> {
-                // 使用句子切分处理流式响应
-                chatService.chatStreamBySentence(session, text, false,
-                        (sentence, isFirst, isLast) -> {
-                            handleSentence(
-                                    session,
-                                    sentence,
-                                    isFirst,
-                                    isLast
-                            );
-                        });
-            });
+            Player player = new FilePlayer(session, messageService, sessionManager, sysMessageService);
+            if(session.getPlayer()==null){
+                // 正常都应该是这个
+                session.setPlayer(player);
+            }
+
+            // 设置 assistantTimeMillis（唤醒场景需要）
+            if (session.getAssistantTimeMillis() == null) {
+                session.setAssistantTimeMillis(System.currentTimeMillis());
+            }
+            
+            wakeUp(session, text, session.getConversation().getRole());
         } catch (Exception e) {
             logger.error("处理唤醒词失败: {}", e.getMessage(), e);
         }
     }
+
+    private FileSynthesizer wakeUp(ChatSession session, String text, SysRole role) {
+        Assert.notNull(role, "role cannot be null");
+        // 获取TTS配置
+        SysConfig ttsConfig;
+        if (role.getTtsId() != null) {
+            ttsConfig = configService.selectConfigById(role.getTtsId());
+        } else {
+            ttsConfig = null;
+        }
+        String voiceName = role.getVoiceName();
+        TtsService ttsService = ttsFactory.getTtsService(ttsConfig, voiceName, role.getTtsPitch(), role.getTtsSpeed());
+        // 唤醒词场景强制使用非流式Synthesizer（用于播放音效和欢迎语）
+        Player player = session.getPlayer();
+
+        if(player == null){
+            player = new FilePlayer(session, messageService, sessionManager, sysMessageService);
+            logger.debug("当前session.player为null，新建一个FilemPlayer");
+            session.setPlayer(player);
+        }else{
+            logger.debug("当前session.player: {}", player.getClass());
+        }
+
+        FileSynthesizer synthesizer = new FileSynthesizer(session, messageService, ttsService, player);
+        session.setSynthesizer(synthesizer);
+
+        messageService.sendSttMessage(session, text);
+
+        // 获取欢迎语
+        UserMessage userMessage = saveUserAudio(session, null, text);
+        boolean useFunctionCall = false;
+        Flux<ChatResponse> responseFlux = chatService.chatStream(session, userMessage, useFunctionCall);
+        synthesizer.startSynthesis(responseFlux);
+        return synthesizer;
+    }
+
 
     /**
      * 处理文本消息交互
@@ -1024,84 +396,128 @@ public class DialogueService{
      * 
      * @param session
      * @param inputText    输入文本
-     * @param textConsumer 具体处理输入文本，传入 dialogId
      */
-    public void handleText(ChatSession session, String inputText, Consumer<Long> textConsumer) {
+    public void handleText(ChatSession session, String inputText ) {
         // 初始化对话状态
         String sessionId = session.getSessionId();
-        initChat(sessionId);
+
         try {
             SysDevice device = sessionManager.getDeviceConfig(sessionId);
             if (device == null) {
                 return;
             }
             sessionManager.updateLastActivity(sessionId);
-            // 设置用户消息的创建时间戳，要在消息入库前获得时间戳。 后续考虑:传递的消息不一定是String，也可以是封装的。
-            final Long userTimeMillis =  System.currentTimeMillis();
-            session.setUserTimeMillis(userTimeMillis);
             // 发送识别结果
             messageService.sendSttMessage(session, inputText);
-            audioService.sendStart(session);
+            messageService.sendTtsMessage(session, null, "start");
+            logger.info("处理聊天文字输入: \"{}\"", inputText);
+
+            UserMessage userMessage = saveUserAudio(session, null, inputText);
 
             // 设置LLM生成消息的时间戳作为Assistant消息的创建时间戳，也用于约定保存音频文件的路径。一定要在LLM前设置时间戳。
             final Long assistantTimeMillis = System.currentTimeMillis();
             session.setAssistantTimeMillis(assistantTimeMillis);
 
-            if (textConsumer != null) {
-                // 如果指定了输出文本，则直接使用指定的文本生成语音
-                // TODO 重新思考这个textConsumer的作用。
-                textConsumer.accept(assistantTimeMillis);
-            } else {
-                logger.info("处理聊天文字输入: \"{}\"", inputText);
-                // 使用句子切分处理流式响应
-                chatService.chatStreamBySentence(session, inputText, true,
-                        (sentence, isFirst, isLast) -> {
-                            handleSentence(
-                                    session,
-                                    sentence,
-                                    isFirst,
-                                    isLast);
-                        });
+            // 优先检测用户意图，如果检测到明确意图则直接处理，不走 LLM
+            UserIntent intent = intentDetector.detectIntent(inputText);
+            if (intent != null) {
+                handleIntent(session, intent, inputText);
+                return;
             }
+
+            // 使用句子切分处理流式响应
+            boolean useFunctionCall = true;
+            Flux<ChatResponse> chatResponseFlux =chatService.chatStream(session, userMessage, useFunctionCall);
+
+            Synthesizer synthesizer = initSynthesizer(session);
+            synthesizer.startSynthesis(chatResponseFlux);
         } catch (Exception e) {
-            logger.error("处理唤醒词失败: {}", e.getMessage(), e);
+            logger.error("处理文本消息失败: {}", e.getMessage(), e);
         }
     }
+
+    /**
+     * 处理检测到的用户意图
+     * 
+     * @param session 聊天会话
+     * @param intent 检测到的意图
+     * @param userInput 用户输入文本
+     */
+    private void handleIntent(ChatSession session, IntentDetector.UserIntent intent, String userInput) {
+
+        logger.info("处理用户意图: type={}, input=\"{}\"", intent.getType(), userInput);
+
+        switch (intent.getType()) {
+            case "EXIT":
+                // 处理退出意图
+                sendGoodbyeMessage(session);
+                break;
+            
+            // 未来可以添加更多意图处理
+            // case "WELCOME":
+            //     sendWelcomeMessage(session);
+            //     break;
+            // case "HELP":
+            //     sendHelpMessage(session);
+            //     break;
+            
+            default:
+                logger.warn("未知的意图类型: {}", intent.getType());
+                break;
+        }
+    }
+
 
     /**
      * 发送告别语并在播放完成后关闭会话
      *
      * @param session WebSocket会话
-     * @return 是否成功发送告别语
+     * @return 发送的告别语
      */
     public String sendGoodbyeMessage(ChatSession session) {
+        return sendExitMessage(session, goodbyeMessages, "用户主动退出");
+    }
+
+    /**
+     * 发送超时提示语并在播放完成后关闭会话
+     * 用于会话超时自动退出
+     *
+     * @param session WebSocket会话
+     * @return 发送的超时提示语
+     */
+    public String sendTimeoutMessage(ChatSession session) {
+        return sendExitMessage(session, timeoutMessages, "会话超时退出");
+    }
+
+    /**
+     * 发送退出消息的通用方法
+     *
+     * @param session WebSocket会话
+     * @param messageSupplier 消息供应器(告别语或超时提示语)
+     * @param reason 退出原因(用于日志)
+     * @return 发送的消息
+     */
+    private String sendExitMessage(ChatSession session, Supplier<String> messageSupplier, String reason) {
         try {
-            if (session != null && session.isAudioChannelOpen()) {
-
-                String sessionId = session.getSessionId();
-
-                // 初始化对话处理状态
-                initChat(sessionId);
+            if (session != null) {
 
                 // 随机选择一条告别语
-                String goodbyeMessage = goodbyeMessages.get(new Random().nextInt(goodbyeMessages.size()));
+                String goodbyeMessage = messageSupplier.get();
 
                 // 设置会话在完成后关闭
-                sessionManager.setCloseAfterChat(sessionId, true);
+                session.setCloseAfterChat(true);
 
-                // 发送TTS开始状态
-                audioService.sendStart(session);
                 // 设置assistantTimeMillis
                 final Long assistantTimeMillis = System.currentTimeMillis();
                 session.setAssistantTimeMillis(assistantTimeMillis);
 
+                // 发送start消息，通知设备进入说话状态
+                messageService.sendTtsMessage(session, null, "start");
+
                 // 直接处理告别语，不通过LLM
-                handleSentence(
-                        session,
-                        goodbyeMessage,
-                        true, // 作为第一句
-                        true // 同时也是最后一句
-                );
+                Synthesizer synthesizer = initSynthesizer(session);
+                synthesizer.append(goodbyeMessage);
+                synthesizer.setLast();
                 return goodbyeMessage;
             } else {
                 // 会话已关闭，直接清理资源
@@ -1109,7 +525,7 @@ public class DialogueService{
                 return "goodbye!";
             }
         } catch (Exception e) {
-            logger.error("发送告别语失败: {}", e.getMessage(), e);
+            logger.error("发送退出消息失败: {}", e.getMessage(), e);
             return "goodbye!";
         }
     }
@@ -1127,39 +543,31 @@ public class DialogueService{
             sessionManager.setStreamingState(sessionId, false);
 
             if (sessionManager.isMusicPlaying(sessionId)) {
-                musicService.stopMusic(sessionId);
-                huiBenService.stopHuiBen(sessionId);
+                if(session.getPlayer() instanceof MusicService.MusicPlayer musicPlayer){
+                    musicPlayer.stop();
+                }
+                if(session.getPlayer() instanceof HuiBenService.HuiBenPlayer huiBenPlayer){
+                    huiBenPlayer.stop();
+                }
                 return;
             }
             // 清空句子队列
-            CopyOnWriteArrayList<Sentence> queue = sentenceQueue.get(sessionId);
-            if (queue != null) {
-                queue.clear();
-            }
-
-            // 重置首句处理状态
-            AtomicBoolean firstDone = firstSentDone.get(sessionId);
-            if (firstDone != null) {
-                firstDone.set(false);
-            }
-
-            // 清理TTS任务队列和信号量
-            PriorityBlockingQueue<TtsTask> taskQueue = sessionTaskQueues.get(sessionId);
-            if (taskQueue != null) {
-                taskQueue.clear();
-                logger.info("已清空TTS任务队列 - SessionId: {}", sessionId);
-            }
-            
-            // 释放所有信号量许可，确保正在进行的TTS任务能够完成
-            Semaphore semaphore = sessionSemaphores.get(sessionId);
-            if (semaphore != null) {
-                // 释放所有可能的许可，让正在进行的任务能够完成
-                semaphore.release(MAX_CONCURRENT_PER_SESSION);
-                logger.info("已释放TTS信号量许可 - SessionId: {}", sessionId);
+            var synthesizer = session.getSynthesizer();
+            if(synthesizer!=null){
+                synthesizer.clearAllSentences();
+                synthesizer.cancel();
+                session.setSynthesizer(null);
             }
 
             // 终止语音发送
-            audioService.sendStop(session);
+            Player player = session.getPlayer();
+            if(player!=null){
+                player.stop();
+            }
+
+            // 无论player是否存在，都需要发送stop消息通知设备进入聆听状态
+            // 这是因为设备可能在还未创建player时就发送了abort消息
+            messageService.sendTtsMessage(session, null, "stop");
         } catch (Exception e) {
             logger.error("中止对话失败: {}", e.getMessage(), e);
         }
@@ -1168,51 +576,19 @@ public class DialogueService{
     /**
      * 清理会话资源
      */
-    public void cleanupSession(String sessionId) {
-        seqCounters.remove(sessionId);
-        sttStartTimes.remove(sessionId);
-        llmStartTimes.remove(sessionId);
-        sentenceQueue.remove(sessionId);
-        firstSentDone.remove(sessionId);
-        locks.remove(sessionId);
 
-        // 新增：清理并发控制相关资源
-        sessionSemaphores.remove(sessionId);
-        PriorityBlockingQueue<TtsTask> taskQueue = sessionTaskQueues.remove(sessionId);
-        if (taskQueue != null) {
-            taskQueue.clear();
+    public void cleanupSession(ChatSession session) {
+        //清理对话上下文状态信息
+        Synthesizer synthesizer = session.getSynthesizer();
+        if(synthesizer!=null){
+            synthesizer.cancel();
         }
+        session.setSynthesizer( null);
 
-        // 清理AudioService中的资源
-        audioService.cleanupSession(sessionId);
+        // 清理ChatSession中可能绑定的播放器资源
+        if(session.getPlayer()!=null){
+            session.getPlayer().stop();
+        }
     }
 
-    /**
-     * 是否正在对话中
-     * @param sessionId
-     * @return
-     */
-    public boolean isDialog(String sessionId) {
-        ReentrantLock dialogLock = locks.get(sessionId);
-        return (dialogLock != null && dialogLock.isLocked())
-                || (sentenceQueue.get(sessionId) != null && !sentenceQueue.get(sessionId).isEmpty());
-    }
-
-    // 添加告别语列表
-    private static final List<String> goodbyeMessages = Arrays.asList(
-            "看来你暂时不需要我了，我先休息一下啦，有需要再叫我哦~",
-            "你好像在忙别的事情，我先退下啦，需要我随时喊我哦~",
-            "那我先不打扰你啦，有问题随时叫我，拜拜~",
-            "看来你有别的事情要忙，我先走啦，需要我时再呼唤我哦~",
-            "我发现你有一会儿没说话了，我先去充电啦，需要我时再叫我~",
-            "你好像在忙，我先不打扰你啦，有需要再喊我哦，拜拜~",
-            "那我先不打扰你啦，需要我时随时可以唤醒我，拜拜~",
-            "我先去休息一下啦，有什么需要随时叫我，拜拜~",
-            "看起来你在忙别的事情，我先不打扰你啦，需要我时再叫我~",
-            "那我先告退啦，需要我的时候再呼唤我，拜拜~",
-            "我先离开一会儿，有需要随时叫我，拜拜~",
-            "我先去休息一下，有需要随时叫我，拜拜~",
-            "那我先不打扰你啦，需要我时再叫我，拜拜~",
-            "看来你有别的事情要忙，我先离开啦，需要时再叫我哦~",
-            "我发现你有段时间没说话了，我先去充电啦，需要我时再唤醒我~");
 }

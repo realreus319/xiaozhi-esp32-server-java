@@ -324,7 +324,7 @@ public class AudioEnhancer {
      */
     private float[] applyAdaptiveGain(float[] samples) {
         // 固定使用最大增益10倍
-        float gain = 10.0f;
+        float gain = 3.0f;
         
         currentGain = gain;
         previousGain = gain;

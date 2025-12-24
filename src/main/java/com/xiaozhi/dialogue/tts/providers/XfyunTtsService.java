@@ -1,20 +1,22 @@
 package com.xiaozhi.dialogue.tts.providers;
 
-import cn.xfyun.api.TtsClient;
-import cn.xfyun.model.response.TtsResponse;
-import cn.xfyun.service.tts.AbstractTtsWebSocketListener;
-import com.xiaozhi.dialogue.tts.TtsService;
-import com.xiaozhi.entity.SysConfig;
-import okhttp3.Response;
-import okhttp3.WebSocket;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.xiaozhi.dialogue.tts.TtsService;
+import com.xiaozhi.entity.SysConfig;
+
+import cn.xfyun.api.TtsClient;
+import cn.xfyun.model.response.TtsResponse;
+import cn.xfyun.service.tts.AbstractTtsWebSocketListener;
+import okhttp3.Response;
+import okhttp3.WebSocket;
 
 public class XfyunTtsService implements TtsService {
     private static final Logger logger = LoggerFactory.getLogger(XfyunTtsService.class);
@@ -29,7 +31,7 @@ public class XfyunTtsService implements TtsService {
     // 音频输出路径
     private String outputPath;
 
-    // appid,apiKey,apiSecret是在开放平台控制台(https://console.xfyun.cn/)获得
+    // appid, apiKey, apiSecret是在开放平台控制台(https://console.xfyun.cn/)获得
     private String appId;
     private String apiKey;
     private String apiSecret;
@@ -51,6 +53,21 @@ public class XfyunTtsService implements TtsService {
     @Override
     public String getProviderName() {
         return PROVIDER_NAME;
+    }
+
+    @Override
+    public String getVoiceName() {
+        return voiceName;
+    }
+
+    @Override
+    public Float getSpeed() {
+        return speed;
+    }
+
+    @Override
+    public Float getPitch() {
+        return pitch;
     }
 
     @Override
@@ -85,7 +102,7 @@ public class XfyunTtsService implements TtsService {
     }
 
     /**
-     * 发送POST请求到，获取语音合成结果
+     * 发送POST请求到 xfyun，获取语音合成结果
      */
     private boolean sendRequest(String text, File file) throws Exception {
         CountDownLatch recognitionLatch = new CountDownLatch(1);
@@ -112,14 +129,35 @@ public class XfyunTtsService implements TtsService {
                 //返回格式为音频文件的二进制数组bytes
                 @Override
                 public void onSuccess(byte[] bytes) {
+                    FileOutputStream outputStream = null;
                     try {
-                        FileOutputStream outputStream = new FileOutputStream(file);
+                        outputStream = new FileOutputStream(file);
                         outputStream.write(bytes);
                         outputStream.flush();
-                    } catch (IOException e) {
+                        
+                        // 确保文件句柄被释放
+                        if(outputStream != null){
+                            try {
+                                outputStream.close();
+                                outputStream = null;  // 标记已关闭
+                            } catch (IOException e) {
+                                logger.error("关闭 xfyun 语音合成文件流失败", e);
+                                throw new RuntimeException("文件关闭失败", e);
+                            }
+                        }
+                        
+                        // 验证文件已成功写入
+                        if (!file.exists() || file.length() == 0) {
+                            throw new RuntimeException("音频文件写入失败");
+                        }
+                        
+                    } catch (Exception e) {
+                        logger.error("写入音频文件失败", e);
                         throw new RuntimeException(e);
+                    } finally {
+                        // 最后确保countDown被调用
+                        recognitionLatch.countDown();
                     }
-                    recognitionLatch.countDown();
                 }
 
                 //授权失败通过throwable.getMessage()获取对应错误信息
@@ -141,10 +179,10 @@ public class XfyunTtsService implements TtsService {
             recognitionLatch.countDown();
             throw new Exception("发送TTS请求失败", e);
         }
-        // 等待识别完成或超时
+        // 等待语音合成完成或超时
         boolean recognized = recognitionLatch.await(RECOGNITION_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         if (!recognized) {
-            logger.warn("讯飞云识别超时");
+            logger.warn("讯飞云语音合成超时");
         }
         return true;
     }

@@ -1,5 +1,6 @@
 package com.xiaozhi.dialogue.llm.tool;
 
+import com.xiaozhi.utils.JsonUtil;
 import org.springframework.ai.tool.execution.ToolCallResultConverter;
 
 import java.lang.reflect.Type;
@@ -14,6 +15,6 @@ public class ToolCallStringResultConverter implements ToolCallResultConverter {
 
     @Override
     public String convert(Object result, Type returnType) {
-        return String.valueOf(result);
+        return JsonUtil.toJson(result);
     }
 }

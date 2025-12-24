@@ -30,7 +30,7 @@ const formData = reactive({
   tel: userInfo.value.tel || '',
   email: userInfo.value.email || '',
   password: '',
-  confirmPassword: ''
+  confirmPassword: '',
 })
 
 // 密码强度
@@ -122,16 +122,17 @@ const submitLoading = ref(false)
 const handleSubmit = async () => {
   try {
     await formRef.value?.validate()
-    
+
     submitLoading.value = true
-    
+
     const updateData: UpdateUserParams = {
+      userId: userInfo.value.userId,
       username: userInfo.value.username,
       name: formData.name,
       tel: formData.tel,
-      email: formData.email
+      email: formData.email,
     }
-    
+
     // 只有填写了密码才传递密码字段
     if (formData.password) {
       updateData.password = formData.password
@@ -197,6 +198,7 @@ const updateUserAvatar = async (avatarUrl: string) => {
     const relativePath = getRelativePath(avatarUrl)
     
     const updateData: UpdateUserParams = {
+      userId: userInfo.value.userId,
       username: userInfo.value.username,
       avatar: relativePath
     } as UpdateUserParams

@@ -1,6 +1,7 @@
 package com.xiaozhi.service.impl;
 
 import com.github.pagehelper.PageHelper;
+import com.xiaozhi.common.cache.CacheHelper;
 import com.xiaozhi.common.web.PageFilter;
 import com.xiaozhi.dao.RoleMapper;
 import com.xiaozhi.entity.SysRole;
@@ -9,7 +10,6 @@ import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.Cache;
 import org.springframework.cache.CacheManager;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,9 +28,12 @@ public class SysRoleServiceImpl extends BaseServiceImpl implements SysRoleServic
 
     @Resource
     private RoleMapper roleMapper;
-    
+
     @Autowired(required = false)
     private CacheManager cacheManager;
+
+    @Resource
+    private CacheHelper cacheHelper;
 
     /**
      * 添加角色
@@ -96,9 +99,60 @@ public class SysRoleServiceImpl extends BaseServiceImpl implements SysRoleServic
         return result;
     }
 
+    /**
+     * 删除角色
+     *
+     * @param roleId
+     * @return
+     */
     @Override
-    @Cacheable(value = CACHE_NAME, key = "#roleId", unless = "#result == null")
+    @Transactional
+    public int deleteById(Integer roleId) {
+        int result = roleMapper.deleteById(roleId);
+
+        // 如果删除成功，清除缓存
+        if (result > 0 && cacheManager != null) {
+            Cache cache = cacheManager.getCache(CACHE_NAME);
+            if (cache != null) {
+                cache.evict(roleId);
+            }
+        }
+
+        return result;
+    }
+
+    @Override
     public SysRole selectRoleById(Integer roleId) {
-        return roleMapper.selectRoleById(roleId);
+        // 使用分布式锁防止缓存击穿(特别是默认角色的高并发访问)
+        return cacheHelper.getWithLock(
+            "role:" + roleId,
+            // 从缓存获取
+            () -> {
+                if (cacheManager != null) {
+                    Cache cache = cacheManager.getCache(CACHE_NAME);
+                    if (cache != null) {
+                        Cache.ValueWrapper wrapper = cache.get(roleId);
+                        if (wrapper != null) {
+                            return (SysRole) wrapper.get();
+                        }
+                    }
+                }
+                return null;
+            },
+            // 从数据库获取
+            () -> {
+                SysRole role = roleMapper.selectRoleById(roleId);
+
+                // 手动写入缓存
+                if (role != null && cacheManager != null) {
+                    Cache cache = cacheManager.getCache(CACHE_NAME);
+                    if (cache != null) {
+                        cache.put(roleId, role);
+                    }
+                }
+
+                return role;
+            }
+        );
     }
 }

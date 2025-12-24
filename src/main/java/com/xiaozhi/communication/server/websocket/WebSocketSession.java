@@ -50,11 +50,6 @@ public class WebSocketSession extends ChatSession {
     }
 
     @Override
-    public boolean isAudioChannelOpen() {
-        return session.isOpen();
-    }
-
-    @Override
     public void sendTextMessage(String message) {
         try {
             session.sendMessage(new TextMessage(message));

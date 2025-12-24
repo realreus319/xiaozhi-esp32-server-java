@@ -13,30 +13,26 @@ export function queryDevices(params: Partial<DeviceQueryParams>) {
  * 添加设备
  */
 export function addDevice(code: string) {
-  return http.post(api.device.add, { code })
+  return http.postJSON(api.device.add, { code })
 }
 
 /**
  * 更新设备信息
  */
 export function updateDevice(data: Partial<Device>) {
-  return http.post(api.device.update, {
-    deviceId: data.deviceId,
-    deviceName: data.deviceName,
-    roleId: data.roleId,
-  })
+  return http.putJSON(`${api.device.update}/${data.deviceId}`, data)
 }
 
 /**
  * 删除设备
  */
 export function deleteDevice(deviceId: string) {
-  return http.post(api.device.delete, { deviceId })
+  return http.delete(`${api.device.delete}/${deviceId}`)
 }
 
 /**
  * 清除设备记忆
  */
 export function clearDeviceMemory(deviceId: string) {
-  return http.post(api.message.delete, { deviceId })
+  return http.delete(api.message.delete, { deviceId })
 }

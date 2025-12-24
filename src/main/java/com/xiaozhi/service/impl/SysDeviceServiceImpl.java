@@ -1,6 +1,7 @@
 package com.xiaozhi.service.impl;
 
 import com.github.pagehelper.PageHelper;
+import com.xiaozhi.common.cache.BloomFilterManager;
 import com.xiaozhi.common.web.PageFilter;
 import com.xiaozhi.communication.common.ChatSession;
 import com.xiaozhi.communication.common.SessionManager;
@@ -13,6 +14,7 @@ import com.xiaozhi.entity.SysMessage;
 import com.xiaozhi.entity.SysRole;
 import com.xiaozhi.service.SysConfigService;
 import com.xiaozhi.service.SysDeviceService;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import jakarta.annotation.Resource;
 import org.apache.ibatis.javassist.NotFoundException;
 import org.slf4j.Logger;
@@ -57,6 +59,12 @@ public class SysDeviceServiceImpl extends BaseServiceImpl implements SysDeviceSe
     @Resource
     private ApplicationContext applicationContext;
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    private BloomFilterManager bloomFilterManager;
+
     /**
      * 添加设备
      *
@@ -96,7 +104,14 @@ public class SysDeviceServiceImpl extends BaseServiceImpl implements SysDeviceSe
         }
 
         device.setRoleId(selectedRole.getRoleId());
-        return deviceMapper.add(device);
+        int result = deviceMapper.add(device);
+
+        // 添加成功后,将设备ID加入布隆过滤器
+        if (result > 0 && device.getDeviceId() != null) {
+            bloomFilterManager.addDeviceId(device.getDeviceId());
+        }
+
+        return result;
 
     }
 
@@ -136,8 +151,15 @@ public class SysDeviceServiceImpl extends BaseServiceImpl implements SysDeviceSe
     }
 
     @Override
-    @Cacheable(value = CACHE_NAME, key = "#deviceId.replace(\":\", \"-\")", unless = "#result == null")
+    @Cacheable(value = CACHE_NAME, key = "#deviceId.replace(\":\", \"-\")")
     public SysDevice selectDeviceById(String deviceId) {
+        // 使用布隆过滤器快速判断设备是否不存在
+        if (!bloomFilterManager.mightContain(deviceId)) {
+            logger.debug("布隆过滤器拦截: 设备ID不存在 - {}", deviceId);
+            return null;  // 布隆过滤器判断一定不存在,直接返回null
+        }
+
+        // 布隆过滤器判断可能存在,继续查询数据库
         return deviceMapper.selectDeviceById(deviceId);
     }
 
@@ -171,6 +193,31 @@ public class SysDeviceServiceImpl extends BaseServiceImpl implements SysDeviceSe
     public int updateCode(SysDevice device) {
         return deviceMapper.updateCode(device);
     }
+    
+    @Override
+    @Transactional
+    public int batchUpdate(List<String> deviceIds, Integer userId, Integer roleId) {
+        if (deviceIds == null || deviceIds.isEmpty()) {
+            return 0;
+        }
+
+        int successCount = 0;
+
+        for (String deviceId : deviceIds) {
+            SysDevice device = new SysDevice();
+            device.setDeviceId(deviceId.trim());
+            device.setUserId(userId);
+
+            if (roleId != null) {
+                device.setRoleId(roleId);
+            }
+
+            // 更新设备
+            successCount += update(device);;
+        }
+
+        return successCount;
+    }
 
     /**
      * 更新设备信息
@@ -196,13 +243,6 @@ public class SysDeviceServiceImpl extends BaseServiceImpl implements SysDeviceSe
             session.setSysDevice(device);
         }
         return rows;
-    }
-
-    @Override
-    public String generateToken(String deviceId) {
-        String token = UUID.randomUUID().toString();
-        deviceMapper.insertCode(deviceId, token);
-        return token;
     }
 
 }

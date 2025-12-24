@@ -84,6 +84,7 @@
                 <otherwise>
                     AND provider != 'coze'
                     AND provider != 'dify'
+                    AND provider != 'xingchen'
                 </otherwise>
             </choose>
             <if test="configName != null and configName != ''">AND configName LIKE CONCAT('%', #{configName}, '%')</if>

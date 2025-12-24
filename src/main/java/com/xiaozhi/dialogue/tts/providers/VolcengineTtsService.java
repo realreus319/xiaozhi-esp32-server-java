@@ -54,6 +54,21 @@ public class VolcengineTtsService implements TtsService {
     }
 
     @Override
+    public String getVoiceName() {
+        return voiceName;
+    }
+
+    @Override
+    public Float getSpeed() {
+        return speed;
+    }
+
+    @Override
+    public Float getPitch() {
+        return pitch;
+    }
+
+    @Override
     public String textToSpeech(String text) throws Exception {
         if (text == null || text.isEmpty()) {
             logger.warn("文本内容为空！");

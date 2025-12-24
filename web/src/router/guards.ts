@@ -20,7 +20,7 @@ export function setupRouterGuards(router: Router) {
     const baseTitle = import.meta.env.VITE_APP_TITLE || 'Connect Ai-智能物联网管理平台'
     if (to.meta.title) {
       // 如果是翻译键，则进行翻译
-      const title = to.meta.title.startsWith('router.') 
+      const title = to.meta.title.startsWith('router.')
         ? i18n.global.t(to.meta.title)
         : to.meta.title
       document.title = `${title} - ${baseTitle}`
@@ -53,19 +53,16 @@ export function setupRouterGuards(router: Router) {
       return
     }
 
+    // 2.1 处理根路径重定向（根据用户类型跳转到不同首页）
+    if (to.path === '/') {
+      const defaultPath = isAdmin ? '/dashboard' : '/agents'
+      next({ path: defaultPath })
+      NProgress.done()
+      return
+    }
+
     // 3. 权限检查
     if (to.meta.requiresAuth) {
-      // 检查用户信息是否完整（如果有token但没有用户信息，说明登录信息已失效）
-      if (!userStore.userInfo || !userStore.userInfo.userId) {
-        console.warn('用户信息不完整，可能登录已失效，重新登录')
-        // 清除无效的token和用户信息
-        userStore.clearToken()
-        userStore.clearUserInfo()
-        next(`/login?redirect=${to.path}`)
-        NProgress.done()
-        return
-      }
-
       // 检查是否需要管理员权限
       if (to.meta.isAdmin && !isAdmin) {
         console.warn(`用户无权限访问: ${to.path}`)
@@ -111,6 +108,20 @@ export function setupRouterGuards(router: Router) {
   router.onError((error) => {
     console.error('路由错误:', error)
     NProgress.done()
+
+    // 检测动态导入失败（chunk 加载失败）
+    if (
+      error.message?.includes('Failed to fetch dynamically imported module') ||
+      error.message?.includes('Importing a module script failed') ||
+      (error.message?.includes('Failed to fetch') && error.message?.match(/\.js/))
+    ) {
+      console.warn('路由模块加载失败，页面版本可能已更新，即将刷新页面')
+
+      // 延迟一小段时间后刷新，避免立即刷新造成的闪烁
+      setTimeout(() => {
+        window.location.reload()
+      }, 100)
+    }
   })
 }
 

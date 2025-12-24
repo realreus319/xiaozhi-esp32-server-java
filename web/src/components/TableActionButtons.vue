@@ -1,5 +1,8 @@
 <template>
   <a-space :size="size">
+    <!-- 自定义操作插槽 -->
+    <slot name="actions" :record="record" />
+    
     <!-- 编辑按钮 -->
     <a v-if="showEdit && hasPermission('edit')" @click="handleEdit">
       {{ editText || t('common.edit') }}
@@ -27,9 +30,6 @@
     >
       {{ setDefaultText || t('common.setAsDefault') }}
     </a>
-    
-    <!-- 自定义操作插槽（在删除之前） -->
-    <slot name="actions" :record="record" />
     
     <!-- 分隔线（如果有删除按钮） -->
     <template v-if="showDelete && hasPermission('delete') && hasAnyVisibleButton">

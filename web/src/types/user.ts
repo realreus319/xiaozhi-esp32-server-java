@@ -33,6 +33,7 @@ export interface UserQueryParams {
  * 更新用户信息参数
  */
 export interface UpdateUserParams {
+  userId?: string
   username?: string
   name?: string
   email?: string

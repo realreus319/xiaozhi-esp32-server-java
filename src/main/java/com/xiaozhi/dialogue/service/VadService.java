@@ -43,7 +43,7 @@ public class VadService {
     private int tailKeepMs;
 
     // 音频增强配置
-    @Value("${vad.audio.enhancement.enabled:true}")
+    @Value("${vad.audio.enhancement.enabled:false}")
     private boolean audioEnhancementEnabled;
 
     // 每10帧输出一次VAD状态
@@ -54,12 +54,8 @@ public class VadService {
     
     // 最小PCM数据长度 (16kHz, 16bit, mono, 30ms = 960 bytes)
     private static final int MIN_PCM_LENGTH = 960;
-    
-    // VAD模型的样本大小 (16kHz, 512 samples)
+
     private static final int VAD_SAMPLE_SIZE = AudioUtils.BUFFER_SIZE;
-    
-    @Autowired
-    private OpusProcessor opusProcessor;
 
     @Autowired
     private SileroVadModel vadModel;
@@ -426,7 +422,7 @@ public class VadService {
                 // 解码Opus数据
                 byte[] pcmData;
                 try {
-                    pcmData = opusProcessor.opusToPcm(sessionId, opusData);
+                    pcmData = new OpusProcessor().opusToPcm(opusData);
                     if (pcmData == null || pcmData.length == 0) {
                         return new VadResult(VadStatus.NO_SPEECH, null);
                     }
@@ -526,17 +522,17 @@ public class VadService {
                 state.updateSilence(isSilence, frameDurationMs);
                 
                 // 每N帧输出一次VAD状态（在updateSilence之后，显示当前帧的状态）
-                // if (state.getFrameCounter() % LOG_FRAME_INTERVAL == 0) {
-                //      // 预先格式化浮点数
-                //      String probStr = String.format("%.4f", speechProb);
-                //      String energyStr = String.format("%.6f", energy);
-                //      String thresholdStr = String.format("%.4f", speechThreshold);
-                //      String avgEnergyStr = String.format("%.6f", state.getAvgEnergy());
+                if (state.getFrameCounter() % LOG_FRAME_INTERVAL == 0) {
+                     // 预先格式化浮点数
+                     String probStr = String.format("%.4f", speechProb);
+                     String energyStr = String.format("%.6f", energy);
+                     String thresholdStr = String.format("%.4f", speechThreshold);
+                     String avgEnergyStr = String.format("%.6f", state.getAvgEnergy());
 
-                //     logger.info("VAD状态 - SessionId: {}, 帧: {}, 概率: {}, 能量: {}, 平均能量: {}, 阈值: {}, 静音: {}ms (连续{}帧), isSilent: {}, hasEnergy: {}",
-                //             sessionId, state.getFrameCounter(), probStr, energyStr, avgEnergyStr, 
-                //             thresholdStr, state.getSilenceDuration(), state.getConsecutiveSilenceFrames(), isSilence, hasEnergy);
-                // }
+//                    logger.info("VAD状态 - SessionId: {}, 帧: {}, 概率: {}, 能量: {}, 平均能量: {}, 阈值: {}, 静音: {}ms (连续{}帧), isSilent: {}, hasEnergy: {}",
+//                            sessionId, state.getFrameCounter(), probStr, energyStr, avgEnergyStr,
+//                            thresholdStr, state.getSilenceDuration(), state.getConsecutiveSilenceFrames(), isSilence, hasEnergy);
+                }
 
                 // 处理状态转换
                 if (!state.isSpeaking() && isSpeech) {
@@ -544,13 +540,17 @@ public class VadService {
                     state.pcmData.clear();
                     state.setSpeaking(true);
                     state.resetSilenceFrameCount();  // 重置静音帧计数
-                    
+
+                    // 清空累积缓冲区，确保新的语音检测从干净状态开始
+                    state.pcmAccumulator.reset();
+                    state.lastAccumTime = System.currentTimeMillis();
+
                     // 预先格式化浮点数
                     String probStr = String.format("%.4f", speechProb);
                     String energyStr = String.format("%.6f", energy);
                     String thresholdStr = String.format("%.4f", speechThreshold);
 
-                    logger.debug("检测到语音开始 - SessionId: {}, 概率: {}, 能量: {}, 阈值: {}", 
+                    logger.debug("检测到语音开始 - SessionId: {}, 概率: {}, 能量: {}, 阈值: {}",
                             sessionId, probStr, energyStr, thresholdStr);
 
                     // 获取预缓冲数据
@@ -611,17 +611,21 @@ public class VadService {
                         }
                         
                         state.resetSilenceFrameCount();  // 重置静音帧计数
-                        
+
                         // 重置音频增强器状态（为下一句话准备）
                         AudioEnhancer enhancer = audioEnhancers.get(sessionId);
                         if (enhancer != null) {
                             enhancer.reset();
                         }
-                        
+
                         // 重置VAD模型状态（为下一句话准备）
                         // 清空sileroState，让下一句话从干净状态开始
                         state.sileroState = new float[2][1][128];
-                        
+
+                        // 清空累积缓冲区，避免残留数据影响下一次语音检测
+                        state.pcmAccumulator.reset();
+                        state.lastAccumTime = System.currentTimeMillis();
+
                         return new VadResult(VadStatus.SPEECH_END, enhancedPcmData);
                     } else {
                         // 静音未超时，继续收集（但这是静音帧）

@@ -81,7 +81,7 @@
 
     <insert id="add" parameterType="com.xiaozhi.entity.SysMessage">
         INSERT INTO sys_message ( deviceId, sessionId, sender, roleId, message, messageType, createTime)
-        SELECT #{deviceId}, #{sessionId}, #{sender}, #{roleId}, #{message}, #{messageType},#{createTime,jdbcType=TIMESTAMP}
+        SELECT #{deviceId}, #{sessionId}, #{sender}, #{roleId}, #{message}, #{messageType}, #{createTime,jdbcType=TIMESTAMP}
     </insert>
 
     <!-- 批量保存消息 -->
@@ -93,13 +93,13 @@
         </foreach>
     </insert>
 
-
     <update id="delete" parameterType="com.xiaozhi.entity.SysMessage">
         UPDATE sys_message
         INNER JOIN sys_device ON sys_message.deviceId = sys_device.deviceId
         SET sys_message.state = '0'
         WHERE
             sys_device.userId = #{userId}
+            AND sys_message.state = '1'
         <if test="messageId != null and messageId != ''">
             AND sys_message.messageId = #{messageId}
         </if>

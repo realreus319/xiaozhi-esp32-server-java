@@ -4,6 +4,8 @@ import com.xiaozhi.communication.domain.iot.IotDescriptor;
 import com.xiaozhi.dialogue.llm.memory.Conversation;
 import com.xiaozhi.dialogue.llm.tool.ToolsSessionHolder;
 import com.xiaozhi.dialogue.llm.tool.mcp.device.DeviceMcpHolder;
+import com.xiaozhi.dialogue.service.Player;
+import com.xiaozhi.dialogue.service.Synthesizer;
 import com.xiaozhi.entity.SysDevice;
 import com.xiaozhi.entity.SysRole;
 import com.xiaozhi.enums.ListenMode;
@@ -35,6 +37,7 @@ public abstract class ChatSession {
     protected SysDevice sysDevice;
     /**
      * 设备可用角色列表
+     * TODO ChangeRoleFunction.java 已从数据库中获取，所以这里实际没有被用到。
      */
     protected List<SysRole> sysRoleList;
     /**
@@ -42,6 +45,8 @@ public abstract class ChatSession {
      * 当切换角色时，Conversation应该释放新建。切换角色一般是不频繁的。
      */
     protected Conversation conversation;
+
+    protected Synthesizer synthesizer;
     /**
      * 设备iot信息
      */
@@ -64,7 +69,12 @@ public abstract class ChatSession {
      */
     protected boolean playing;
     /**
-     * 设备状态（auto, realTime)
+     * 是否正在唤醒响应中(播放唤醒音效和欢迎语)
+     * 在此期间应该忽略VAD检测,避免被唤醒词音频误触发打断
+     */
+    protected volatile boolean inWakeupResponse = false;
+    /**
+     * 设备状态(auto, realTime)
      */
     protected ListenMode mode;
     /**
@@ -97,6 +107,10 @@ public abstract class ChatSession {
     // --------------------设备mcp-------------------------
     private DeviceMcpHolder deviceMcpHolder = new DeviceMcpHolder();
 
+    // 可能会有多个线程判断是否为空。 所以这里使用volatile修饰，避免Player初始化多个从而有多个播放器工作线程。
+    //  TODO synchronized 或AtomicReference可能更好。
+    protected volatile Player player;
+
     public ChatSession(String sessionId) {
         this.sessionId = sessionId;
         this.lastActivityTime = Instant.now();
@@ -118,14 +132,6 @@ public abstract class ChatSession {
         return (Long) getAttribute("assistantTimeMillis");
     }
 
-    public void setUserTimeMillis(Long userTimeMillis) {
-        setAttribute("userTimeMillis", userTimeMillis);
-    }
-
-    public Long getUserTimeMillis() {
-        return (Long) getAttribute("userTimeMillis");
-    }
-
     /**
      * 音频文件约定路径为：audio/{device-id}/{role-id}/{timestamp}-user.wav
      * {device-id}/{role-id}/{timestamp}-user 能确定唯一性，不会有并发的麻烦。
@@ -134,7 +140,7 @@ public abstract class ChatSession {
      * @param who
      * @return
      */
-    private Path getAudioPath(String who, Long timeMillis) {
+    public Path getAudioPath(String who, Long timeMillis) {
 
         Instant instant = Instant.ofEpochMilli(timeMillis).truncatedTo(ChronoUnit.SECONDS);
 
@@ -144,17 +150,10 @@ public abstract class ChatSession {
         // 判断设备ID是否有不适合路径的特殊字符，它很可能是mac地址需要转换。
         String deviceId = device.getDeviceId().replace(":", "-");
         String roleId = device.getRoleId().toString();
-        String filename = "%s-%s.wav".formatted(datetime, who);
+        String extension = Conversation.MESSAGE_TYPE_USER.equals(who) ? "wav" : "opus";
+        String filename = "%s-%s.%s".formatted(datetime, who, extension);
         Path path = Path.of(AudioUtils.AUDIO_PATH, deviceId, roleId, filename);
         return path;
-    }
-
-    public Path getUserAudioPath() {
-        return getAudioPath(Conversation.MESSAGE_TYPE_USER, this.getUserTimeMillis());
-    }
-
-    public Path getAssistantAudioPath() {
-        return getAudioPath(Conversation.MESSAGE_TYPE_ASSISTANT, getAssistantTimeMillis());
     }
 
     public ToolsSessionHolder getFunctionSessionHolder() {
@@ -181,7 +180,6 @@ public abstract class ChatSession {
      *
      * @return
      */
-    public abstract boolean isAudioChannelOpen();
 
     public abstract void close();
 

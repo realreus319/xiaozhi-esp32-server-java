@@ -5,8 +5,6 @@ import com.xiaozhi.entity.SysRole;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import static com.xiaozhi.dialogue.llm.memory.MessageWindowConversation.DEFAULT_HISTORY_LIMIT;
-
 @Service
 public class WindowConversationFactory implements ConversationFactory{
 
@@ -20,7 +18,7 @@ public class WindowConversationFactory implements ConversationFactory{
     @Override
     public Conversation initConversation(SysDevice device, SysRole role, String sessionId) {
         Conversation conversation = MessageWindowConversation.builder().chatMemory(chatMemory)
-                .maxMessages(DEFAULT_HISTORY_LIMIT)
+                .maxMessages(16)
                 .role(role)
                 .device(device)
                 .sessionId(sessionId)

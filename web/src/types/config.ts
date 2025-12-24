@@ -14,7 +14,7 @@ export interface Config {
   configName: string
   configDesc?: string
   modelType?: ModelType
-  isDefault?: string // 1-默认 0-非默认
+  isDefault?: string | boolean // 1-默认 0-非默认
   state?: string
   createTime?: string
   // API相关字段
@@ -51,12 +51,13 @@ export interface ConfigField {
   name: string
   label: string
   required: boolean
-  inputType?: string
+  inputType?: string  // 'text' | 'password' | 'select'
   placeholder?: string
   span?: number
   help?: string
   suffix?: string
   defaultUrl?: string
+  options?: Array<{ label: string; value: string }>  // 下拉选项（当 inputType 为 'select' 时使用）
 }
 
 /**

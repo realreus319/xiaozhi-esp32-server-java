@@ -109,7 +109,7 @@ public class CozeChatModel implements ChatModel {
             Map<String, Object> messageMetadata = Optional.ofNullable(message.getMetaData())
                     .map(metaData -> new HashMap<String, Object>(metaData))
                     .orElse(new HashMap<>());
-            var assistantMessage = new AssistantMessage(message.getContent(), messageMetadata);
+            var assistantMessage = AssistantMessage.builder().content(message.getContent()).properties(messageMetadata).build();
             var generation = new Generation(assistantMessage,
                     ChatGenerationMetadata.builder().metadata(BeanUtil.beanToMap(chatPoll.getChat())).build());
             logger.info("耗时：{}ms", System.currentTimeMillis() - start);
@@ -199,7 +199,7 @@ public class CozeChatModel implements ChatModel {
                                 })
                                 .orElse(new HashMap<>());
 
-                        var assistantMessage = new AssistantMessage(content, messageMetadata, toolCalls);
+                        var assistantMessage = AssistantMessage.builder().content(content).properties(messageMetadata).toolCalls(toolCalls).build();
 
                         Map<String, Object> chatMetadata = Optional.ofNullable(event.getChat())
                                 .map(chat -> {

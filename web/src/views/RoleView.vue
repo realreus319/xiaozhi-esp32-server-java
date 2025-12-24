@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { ref, reactive, nextTick, computed } from 'vue'
-import { message, Empty, type FormInstance, type UploadProps } from 'ant-design-vue'
+import { message, type FormInstance, type UploadProps } from 'ant-design-vue'
 import { useI18n } from 'vue-i18n'
-import { 
-  UserOutlined, 
-  LoadingOutlined, 
-  CameraOutlined, 
-  DeleteOutlined, 
+import {
+  UserOutlined,
+  LoadingOutlined,
+  CameraOutlined,
+  DeleteOutlined,
   SnippetsOutlined,
   SoundOutlined,
   PauseCircleOutlined
@@ -14,8 +14,8 @@ import {
 import { useRouter } from 'vue-router'
 import { useTable } from '@/composables/useTable'
 import { useRoleManager } from '@/composables/useRoleManager'
-import { useLoadingStore } from '@/store/loading'
-import { queryRoles, addRole, updateRole, testVoice } from '@/services/role'
+import { useMemoryView } from '@/composables/useMemoryView'
+import { queryRoles, addRole, updateRole, deleteRole, testVoice } from '@/services/role'
 import { queryTemplates } from '@/services/template'
 import { getResourceUrl } from '@/utils/resource'
 import { useAvatar } from '@/composables/useAvatar'
@@ -25,10 +25,10 @@ import type { TableColumnsType, TablePaginationConfig } from 'ant-design-vue'
 import TableActionButtons from '@/components/TableActionButtons.vue'
 
 const { t } = useI18n()
-const loadingStore = useLoadingStore()
 const { getAvatarUrl } = useAvatar()
 
 const router = useRouter()
+const { navigateToMemory } = useMemoryView()
 
 // 表格和分页
 const { loading, data: roleList, pagination, handleTableChange, loadData, createDebouncedSearch } = useTable<Role>()
@@ -46,7 +46,8 @@ const {
   loadAllVoices,
   loadSttOptions,
   getModelInfo,
-  getVoiceInfo
+  getVoiceInfo,
+  formatProviderName,
 } = useRoleManager()
 
 // 查询表单
@@ -77,7 +78,8 @@ const formData = reactive<RoleFormData>({
   ttsId: undefined,
   gender: '',
   ttsPitch: 1.0,
-  ttsSpeed: 1.0
+  ttsSpeed: 1.0,
+  memoryType: 'window'
 })
 
 // 编辑状态
@@ -99,8 +101,7 @@ const selectedTemplateId = ref<number>()
 const promptTemplates = ref<PromptTemplate[]>([])
 const templatesLoading = ref(false)
 
-const selectedTtsId = ref<number | string>('edge_default')
-const selectedProvider = ref<string>('edge')
+const selectedProvider = ref<string>('')
 
 // 折叠面板展开状态
 const modelAdvancedVisible = ref<string[]>([])
@@ -151,6 +152,12 @@ const columns = computed<TableColumnsType>(() => [
     align: 'center'
   },
   {
+    title: t('role.memoryTypeLabel'),
+    dataIndex: 'memoryType',
+    width: 120,
+    align: 'center'
+  },
+  {
     title: t('role.totalDevice'),
     dataIndex: 'totalDevice',
     width: 100,
@@ -165,7 +172,7 @@ const columns = computed<TableColumnsType>(() => [
   {
     title: t('table.action'),
     dataIndex: 'operation',
-    width: 200,
+    width: 250,
     align: 'center',
     fixed: 'right'
   }
@@ -239,7 +246,8 @@ const handleEdit = (record: Role) => {
       ttsId: voiceInfo?.ttsId,
       gender: voiceInfo?.gender || '',
       ttsPitch: record.ttsPitch ?? 1.0,
-      ttsSpeed: record.ttsSpeed ?? 1.0
+      ttsSpeed: record.ttsSpeed ?? 1.0,
+      memoryType: record.memoryType || 'window'
     })
   })
 }
@@ -248,7 +256,7 @@ const handleEdit = (record: Role) => {
 const handleDelete = async (roleId: number) => {
   loading.value = true
   try {
-    const res = await updateRole({ roleId, state: '0' })
+    const res = await deleteRole(roleId)
     if (res.code === 200) {
       message.success(t('role.deleteRoleSuccess'))
       await fetchData()
@@ -267,8 +275,8 @@ const handleDelete = async (roleId: number) => {
 const handleSetDefault = async (roleId: number) => {
   loading.value = true
   try {
-    const res = await updateRole({ 
-      roleId, 
+    const res = await updateRole({
+      roleId,
       isDefault: '1',
     })
     if (res.code === 200) {
@@ -292,7 +300,7 @@ const handleSubmit = async () => {
     submitLoading.value = true
 
     // 统一处理：从所有可用音色中查找
-    const voiceInfo = filteredVoices.value.find(v => v.value === formData.voiceName)
+    const voiceInfo = allVoices.value.find(v => v.value === formData.voiceName)
     const ttsId = voiceInfo?.ttsId || -1
     
     const submitData = {
@@ -300,7 +308,7 @@ const handleSubmit = async () => {
       avatar: avatarUrl.value,
       // 将 isDefault 布尔值转换为字符串 '1' 或 '0'
       isDefault: formData.isDefault ? '1' : '0',
-      ttsId: ttsId
+      ttsId: ttsId,
     }
 
     if (editingRoleId.value) {
@@ -313,6 +321,7 @@ const handleSubmit = async () => {
       : await addRole(submitData)
 
     if (res.code === 200) {
+      
       message.success(editingRoleId.value ? t('role.updateRoleSuccess') : t('role.createRoleSuccess'))
       resetForm()
       activeTabKey.value = '1'
@@ -346,14 +355,14 @@ const resetForm = () => {
   pendingVadValues.value = null
   pendingModelValues.value = null
   pendingTtsValues.value = null
-  
+
   // 停止所有音频播放
   playingVoiceId.value = ''
   voiceAudioCache.forEach(audio => {
     audio.pause()
     audio.currentTime = 0
   })
-  
+
   // 新建时使用模板模式并应用默认模板
   promptEditorMode.value = 'template'
   const defaultTemplate = promptTemplates.value.find(t => t.isDefault == 1)
@@ -364,7 +373,7 @@ const resetForm = () => {
     selectedTemplateId.value = undefined
     formData.roleDesc = ''
   }
-  
+
   // 重置为默认值
   Object.assign(formData, {
     roleName: '',
@@ -383,7 +392,8 @@ const resetForm = () => {
     ttsId: undefined,
     gender: '',
     ttsPitch: 1.0,
-    ttsSpeed: 1.0
+    ttsSpeed: 1.0,
+    memoryType: 'window'
   })
 }
 
@@ -443,7 +453,7 @@ const handlePlayVoice = async (voiceName: string) => {
     
     if (!audio) {
       // 统一处理：从所有可用音色中查找
-      const voiceInfo = filteredVoices.value.find(v => v.value === voiceName)
+      const voiceInfo = allVoices.value.find(v => v.value === voiceName)
       if (!voiceInfo) {
         message.error(t('role.voiceNotFound'))
         loadingVoiceId.value = ''
@@ -626,10 +636,20 @@ const getAvatar = (avatar?: string) => {
 // 获取音色显示名称
 const getVoiceDisplayName = (record: any) => {
   if (!record.voiceName) return ''
-  
+
   // 统一处理：从所有可用音色中查找
   const voiceInfo = allVoices.value.find(v => v.value === record.voiceName)
   return voiceInfo?.label || record.voiceName
+}
+
+// 获取记忆类型显示信息
+const getMemoryTypeInfo = (memoryType?: string) => {
+  switch (memoryType) {
+    case 'window':
+      return { label: t('device.windowMemory'), color: 'orange' }
+    default:
+      return { label: t('device.windowMemory'), color: 'orange' }
+  }
 }
 
 // 加载提示词模板
@@ -648,11 +668,28 @@ const loadTemplates = async () => {
   }
 }
 
-// 根据音色类型过滤音色选项
-const filteredVoices = computed(() => {
-  // 标准音色：显示所有标准音色
-  return allVoices.value
+// 提供商选项（用于标准音色筛选显示，隐藏于克隆音色）
+const providerOptions = computed(() => {
+  const providers = new Set<string>()
+    allVoices.value.forEach(v => {
+    if (v.provider) providers.add(v.provider)
+  })
+  const items = Array.from(providers).map(p => ({ label: formatProviderName(p), value: p }))
+  // prepend All option (empty value means all)
+  return [{ label: t('common.all'), value: '' }, ...items]
 })
+
+// 根据音色类型和提供商过滤音色选项
+const filteredVoices = computed(() => {
+  // 标准音色：按提供商过滤
+  const list = allVoices.value
+  return selectedProvider.value ? list.filter(v => v.provider === selectedProvider.value) : list
+})
+
+// 提供商切换：切换后清空已选音色
+const handleProviderChange = () => {
+  formData.voiceName = undefined
+}
 
 // 初始化：并行加载所有数据（非阻塞式）
 Promise.all([
@@ -762,7 +799,7 @@ if (!editingRoleId.value) {
 
               <!-- 语音识别 -->
               <template v-else-if="column.dataIndex === 'sttName'">
-                <a-tooltip 
+                <a-tooltip
                   :title="record.sttId === -1 || record.sttId === null ? t('role.voskLocalRecognition') : (sttOptions.find(s => s.value === record.sttId)?.label || t('common.unknown'))"
                   placement="top"
                 >
@@ -773,6 +810,13 @@ if (!editingRoleId.value) {
                     {{ sttOptions.find(s => s.value === record.sttId)?.label || t('common.unknown') }}
                   </span>
                 </a-tooltip>
+              </template>
+
+              <!-- 记忆类型 -->
+              <template v-else-if="column.dataIndex === 'memoryType'">
+                <a-tag :color="getMemoryTypeInfo(record.memoryType).color">
+                  {{ getMemoryTypeInfo(record.memoryType).label }}
+                </a-tag>
               </template>
 
               <!-- 默认状态 -->
@@ -790,10 +834,16 @@ if (!editingRoleId.value) {
                   show-delete
                   :is-default="record.isDefault == 1"
                   :delete-title="t('role.confirmDeleteRole')"
-                  @edit="handleEdit"
+                  @edit="() => handleEdit(record)"
                   @set-default="() => handleSetDefault(record.roleId)"
                   @delete="() => handleDelete(record.roleId)"
-                />
+                >
+                  <template #actions>
+                    <a @click="() => navigateToMemory({ roleId: record.roleId })">
+                      {{ t('role.memory') }}
+                    </a>
+                  </template>
+                </TableActionButtons>
               </template>
             </template>
           </a-table>
@@ -1097,6 +1147,25 @@ if (!editingRoleId.value) {
 
             <!-- 音色选择 -->
             <a-row :gutter="20">
+              <a-col :xl="6" :lg="8" :xs="24">
+                <a-form-item>
+                  <a-select
+                    v-model:value="selectedProvider"
+                    :placeholder="t('role.selectProvider')"
+                    :loading="voiceLoading"
+                    @change="handleProviderChange"
+                  >
+                    <a-select-option
+                      v-for="p in providerOptions"
+                      :key="p.value"
+                      :value="p.value"
+                      :label="p.label"
+                    >
+                      {{ p.label }}
+                    </a-select-option>
+                  </a-select>
+                </a-form-item>
+              </a-col>
               <a-col :xl="8" :lg="12" :xs="24">
                 <a-form-item
                   :label="t('role.voiceName')"
@@ -1119,6 +1188,7 @@ if (!editingRoleId.value) {
                       :label="voice.label"
                     >
                       <div style="display: flex; align-items: center; justify-content: space-between;">
+                        <a-tag color="blue" v-if="voice.model">{{ voice.model }}</a-tag>
                         <span>{{ voice.label }}</span>
                         <a-button
                           type="text"
@@ -1195,6 +1265,27 @@ if (!editingRoleId.value) {
                 </a-row>
               </a-collapse-panel>
             </a-collapse>
+
+            <!-- 记忆类型配置 -->
+            <a-divider orientation="left">{{ t('role.memoryTypeSettings') }}</a-divider>
+
+            <a-row :gutter="20">
+              <a-col :xl="8" :lg="12" :xs="24">
+                <a-form-item :label="t('role.memoryTypeLabel')">
+                  <a-select
+                    v-model:value="formData.memoryType"
+                    :placeholder="t('role.selectMemoryType')"
+                  >
+                    <a-select-option value="window">
+                      {{ t('device.windowMemory') }}
+                    </a-select-option>
+                  </a-select>
+                  <div style="margin-top: 8px; color: var(--ant-color-text-tertiary); font-size: 12px">
+                    {{ t('role.memoryTypeTip') }}
+                  </div>
+                </a-form-item>
+              </a-col>
+            </a-row>
 
             <!-- 角色提示词 -->
             <a-divider orientation="left">{{ t('role.rolePrompt') }}</a-divider>

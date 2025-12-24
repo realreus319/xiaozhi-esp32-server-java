@@ -2,6 +2,8 @@ package com.xiaozhi.utils;
 
 import org.bytedeco.ffmpeg.global.avutil;
 import org.bytedeco.javacv.FrameRecorder;
+import org.gagravarr.ogg.*;
+import org.gagravarr.opus.*;
 import org.slf4j.Logger;
 
 import java.io.*;
@@ -18,7 +20,7 @@ public class AudioUtils {
     public static final int FRAME_SIZE = 960;
     public static final int SAMPLE_RATE = 16000; // 采样率
     public static final int CHANNELS = 1; // 单声道
-    public static final int BITRATE = 16000; // 16kbps比特率
+    public static final int BITRATE = 48000; // 48kbps比特率（高质量，接近透明质量）
     public static final int SAMPLE_FORMAT = avutil.AV_SAMPLE_FMT_S16; // 16位PCM
     public static final int BUFFER_SIZE = 512; // 窗口大小
     public static final int OPUS_FRAME_DURATION_MS = 60; // OPUS帧持续时间（毫秒）
@@ -85,7 +87,7 @@ public class AudioUtils {
                 return null;
             }
 
-            return fileName;
+            return AUDIO_PATH + fileName;
         } catch (IOException | InterruptedException e) {
             logger.error("保存MP3文件时发生错误", e);
             if (e instanceof InterruptedException) {
@@ -107,7 +109,7 @@ public class AudioUtils {
         String fileName = uuid + ".wav";
         Path path = Path.of(AUDIO_PATH , fileName);
         saveAsWav(path, audio);
-        return fileName;
+        return AUDIO_PATH + fileName;
     }
     /**
      * 将原始音频数据保存为WAV文件
@@ -163,6 +165,7 @@ public class AudioUtils {
      *
      * @param audioPaths 要合并的音频文件路径列表
      * @return 合并后的WAV文件名
+     * TODO 目前好像可以直接保存为OPUS，不再需要合并音频文件这个方法了
      */
     public static void mergeAudioFiles(Path path, List<String> audioPaths) {
         if (audioPaths.size() == 1) {
@@ -181,7 +184,10 @@ public class AudioUtils {
             var audioChunks = new ArrayList<byte[]>();
             for (var audioPath : audioPaths) {
                 var fullPath = audioPath.startsWith(AUDIO_PATH) ? audioPath : AUDIO_PATH + audioPath;
-                byte[] pcmData = readAsPcm(fullPath);
+                byte[] pcmData;
+
+                pcmData = readAsPcm(fullPath);
+                
                 totalPcmSize += pcmData.length;
                 audioChunks.add(pcmData);
             }
@@ -235,18 +241,9 @@ public class AudioUtils {
      * @return PCM数据字节数组
      */
     public static byte[] wavToPcm(String wavPath) throws IOException {
-        // 读取整个文件
-        byte[] wavData = Files.readAllBytes(Paths.get(wavPath));
-        return wavBytesToPcm(wavData);
-    }
 
-    /**
-     * 从WAV字节数据中提取PCM数据
-     *
-     * @param wavData WAV文件的字节数据
-     * @return PCM数据字节数组
-     */
-    public static byte[] wavBytesToPcm(byte[] wavData) throws IOException {
+        byte[] wavData = Files.readAllBytes(Paths.get(wavPath));
+
         if (wavData == null || wavData.length < 44) { // WAV头至少44字节
             throw new IOException("无效的WAV数据");
         }
@@ -294,8 +291,27 @@ public class AudioUtils {
         } else if (filePath.toLowerCase().endsWith(".pcm")) {
             // 直接读取PCM文件
             return Files.readAllBytes(Paths.get(filePath));
+        } else if (filePath.toLowerCase().endsWith(".opus")) {
+            return opusToPcm(filePath);
         } else {
             throw new IOException("不支持的音频格式: " + filePath);
+        }
+    }
+
+    /**
+     * 从文件读取Opus帧数据，自动处理各种音频格式
+     *
+     * @param filePath 音频文件路径
+     * @return Opus帧列表
+     */
+    public static List<byte[]> readAsOpus(String filePath) throws IOException {
+        if (filePath.toLowerCase().endsWith(".opus")) {
+            // 直接读取 Opus 文件
+            return readOpus(new File(filePath));
+        } else {
+            // 其他格式先转为 PCM，再编码为 Opus
+            byte[] pcmData = readAsPcm(filePath);
+            return new OpusProcessor().pcmToOpus(pcmData, false);
         }
     }
 
@@ -324,13 +340,12 @@ public class AudioUtils {
             Process process = Runtime.getRuntime().exec(command);
 
             // 读取错误输出以便调试
-            try (InputStream errorStream = process.getErrorStream()) {
-                byte[] buffer = new byte[1024];
-                while (errorStream.read(buffer) != -1) {
-                    // 可以选择记录错误输出
-                    // logger.debug(new String(buffer));
-                }
-            }
+            // try (InputStream errorStream = process.getErrorStream()) {
+            //     byte[] buffer = new byte[1024];
+            //     while (errorStream.read(buffer) != -1) {
+            //         logger.debug(new String(buffer));
+            //     }
+            // }
 
             // 等待进程完成
             int exitCode = process.waitFor();
@@ -355,37 +370,97 @@ public class AudioUtils {
     }
 
     /**
-     * 检测音频文件格式并返回MIME类型
+     * 读取标准Ogg Opus文件并转换为PCM数据
      *
-     * @param filePath 音频文件路径
-     * @return MIME类型字符串
+     * @param opusFilePath Ogg Opus文件路径
+     * @return PCM数据
+     * @throws IOException 文件读取异常
      */
-    public static String getMimeType(String filePath) {
-        if (filePath.toLowerCase().endsWith(".mp3")) {
-            return "audio/mpeg";
-        } else if (filePath.toLowerCase().endsWith(".wav")) {
-            return "audio/wav";
-        } else if (filePath.toLowerCase().endsWith(".pcm")) {
-            return "audio/x-pcm";
-        } else if (filePath.toLowerCase().endsWith(".opus")) {
-            return "audio/opus";
-        } else {
-            return "application/octet-stream";
+    public static byte[] opusToPcm(String opusFilePath) throws IOException {
+        // 读取 Opus 帧
+        List<byte[]> opusFrames = readOpus(new File(opusFilePath));
+
+        if (opusFrames.isEmpty()) {
+            throw new IOException("Opus文件为空或读取失败");
+        }
+
+        OpusProcessor opusProcessor = new OpusProcessor();
+
+        // 解码所有帧为 PCM
+        List<byte[]> pcmChunks = new ArrayList<>();
+        for (byte[] opusFrame : opusFrames) {
+            try {
+                byte[] pcmData = opusProcessor.opusToPcm(opusFrame);
+                if (pcmData != null && pcmData.length > 0) {
+                    pcmChunks.add(pcmData);
+                }
+            } catch (Exception e) {
+                // 静默跳过损坏的帧
+            }
+        }
+
+        if (pcmChunks.isEmpty()) {
+            throw new IOException("没有有效的PCM数据");
+        }
+
+        // 计算总大小并合并所有 PCM 数据
+        int totalSize = pcmChunks.stream().mapToInt(chunk -> chunk.length).sum();
+        byte[] result = new byte[totalSize];
+
+        int offset = 0;
+        for (byte[] chunk : pcmChunks) {
+            System.arraycopy(chunk, 0, result, offset, chunk.length);
+            offset += chunk.length;
+        }
+
+        return result;
+    }
+
+    /**
+     * 保存Opus帧数据为标准Ogg Opus文件
+     *
+     * @param opusFrames Opus帧数据列表
+     * @param filePath 保存文件路径
+     * @throws IOException 文件操作异常
+     */
+    public static void saveAsOpus(List<byte[]> opusFrames, String filePath) throws IOException {
+        if (opusFrames == null || opusFrames.isEmpty()) {
+            return;
+        }
+
+        // 创建OpusInfo对象，设置基本参数
+        OpusInfo oi = new OpusInfo();
+        oi.setSampleRate(SAMPLE_RATE);
+        oi.setNumChannels(CHANNELS);
+        oi.setPreSkip(0);
+
+        // 创建OpusTags对象
+        OpusTags ot = new OpusTags();
+        ot.addComment("TITLE", "Xiaozhi TTS Audio");
+        ot.addComment("ARTIST", "Xiaozhi ESP32 Server");
+
+        // 使用try-with-resources管理所有资源
+        try (FileOutputStream fos = new FileOutputStream(filePath);
+             OpusFile opusFile = new OpusFile(fos, oi, ot)) {
+
+            // 写入每个Opus帧
+            for (byte[] frame : opusFrames) {
+                opusFile.writeAudioData(new OpusAudioData(frame));
+            }
         }
     }
 
     /**
      * 获取音频文件的时长
-     * 使用ffprobe
-     * 
+     * 使用 ffprobe 获取所有格式的音频时长
+     *
      * @param path 音频文件路径
      * @return 时长（秒），失败返回-1
      */
     public static double getAudioDuration(Path path) {
         String pathStr = path.toString();
-        
-        try {
 
+        try {
             // 使用ffprobe获取时长
             String[] command = {
                     "ffprobe",
@@ -397,8 +472,19 @@ public class AudioUtils {
             Process process = Runtime.getRuntime().exec(command);
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line = reader.readLine();
-                if (line != null) {
-                    return Double.parseDouble(line.trim());
+                if (line != null && !line.trim().isEmpty()) {
+                    String trimmedLine = line.trim();
+                    // 检查是否是 "N/A" 或其他无效值
+                    if ("N/A".equalsIgnoreCase(trimmedLine) || trimmedLine.isEmpty()) {
+                        logger.warn("ffprobe 返回无效时长: {} - 文件: {}", trimmedLine, pathStr);
+                        return -1;
+                    }
+                    try {
+                        return Double.parseDouble(trimmedLine);
+                    } catch (NumberFormatException e) {
+                        logger.warn("ffprobe 返回的时长无法解析: {} - 文件: {}", trimmedLine, pathStr);
+                        return -1;
+                    }
                 }
             }
             process.waitFor();
@@ -407,4 +493,38 @@ public class AudioUtils {
         }
         return -1;
     }
+
+    /**
+     * 读取标准Ogg Opus文件
+     *
+     * @param file Ogg Opus文件
+     * @return Opus帧列表
+     * @throws IOException 文件读取异常
+     */
+    public static List<byte[]> readOpus(File file) {
+        List<byte[]> frames = new ArrayList<>();
+
+        if (file.length() <= 0) {
+            return frames;
+        }
+
+        try (FileInputStream fis = new FileInputStream(file)) {
+            OggFile oggFile = new OggFile(fis);
+            try (OpusFile opusFile = new OpusFile(oggFile)) {
+                OpusAudioData audioData;
+                while ((audioData = opusFile.getNextAudioPacket()) != null) {
+                    byte[] frameData = audioData.getData();
+                    if (frameData != null && frameData.length > 0) {
+                        frames.add(frameData);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            logger.error("读取Ogg Opus文件失败: {}", file.getAbsolutePath(), e);
+            return frames;
+        }
+
+        return frames;
+    }
+   
 }

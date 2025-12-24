@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
-@Component
+// @Component
 public class PlayHuiBenFunction implements ToolsGlobalRegistry.GlobalFunction {
     private static final Logger logger = LoggerFactory.getLogger(PlayHuiBenFunction.class);
 
@@ -33,7 +33,7 @@ public class PlayHuiBenFunction implements ToolsGlobalRegistry.GlobalFunction {
                     if (num == null || num < 5 || num > 1100) {
                         num = RandomUtil.randomInt(5, 1100);
                     }
-                    huiBenService.playHuiBen(chatSession, num);
+                    huiBenService.newHuiBenPlayer(chatSession,num).play();
                     return "尝试播放绘本《" + num + "》";
 
                 } catch (Exception e) {

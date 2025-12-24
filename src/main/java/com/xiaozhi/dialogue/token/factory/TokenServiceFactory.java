@@ -86,8 +86,9 @@ public class TokenServiceFactory {
      */
     private TokenService createTokenService(SysConfig config) {
         return switch (config.getProvider()) {
-            case "aliyun" -> new AliyunTokenService(config);
-            default -> new CozeTokenService(config);
+            case "aliyun", "aliyun-nls" -> new AliyunTokenService(config);
+            case "coze" -> new CozeTokenService(config);
+            default -> throw new IllegalArgumentException("不支持的Token服务提供商: " + config.getProvider());
         };
     }
 
@@ -140,7 +141,7 @@ public class TokenServiceFactory {
                 try {
                     if (service instanceof AliyunTokenService aliyunService) {
                         // 检查是否需要刷新
-                        String token = aliyunService.getToken(); // 内部会处理刷新逻辑
+                        aliyunService.getToken(); // 内部会处理刷新逻辑
                     }
                 } catch (Exception e) {
                     logger.error("刷新Token时发生错误: {}", e.getMessage(), e);

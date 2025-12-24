@@ -96,7 +96,10 @@ public class SysAgentServiceImpl implements SysAgentService {
         } else if ("dify".equalsIgnoreCase(agent.getProvider())) {
             // 如果是DIFY平台，则从DIFY API获取智能体列表
             return getDifyAgents(agent);
-        } else {
+        } else if ("xingchen".equalsIgnoreCase(agent.getProvider())) {
+            // 如果是星辰平台，则从星辰获取智能体列表
+            return getXingChenAgents(agent);
+        }else {
             // 如果不是特定平台，返回空
             return new ArrayList<>();
         }
@@ -259,6 +262,106 @@ public class SysAgentServiceImpl implements SysAgentService {
         return agentList;
     }
 
+
+    /**
+     * 从DIFY API获取智能体信息，并与数据库同步
+     *
+     * @param agent 智能体信息
+     * @return 智能体集合
+     */
+    private List<SysAgent> getXingChenAgents(SysAgent agent) {
+        List<SysAgent> agentList = new ArrayList<>();
+
+        // 查询所有类型的Dify配置
+        SysConfig queryConfig = new SysConfig();
+        queryConfig.setProvider("xingchen");
+        List<SysConfig> allConfigs = configMapper.query(queryConfig);
+
+        if (ObjectUtils.isEmpty(allConfigs)) {
+            return agentList;
+        }
+
+        List<SysConfig> agentConfigs = allConfigs.stream()
+                .filter(config -> "agent".equals(config.getConfigType()))
+                .collect(Collectors.toList());
+
+        // 创建一个Map来存储llm配置，以apiKey为键
+        Map<String, SysConfig> llmConfigMap = new HashMap<>();
+        allConfigs.stream()
+                .filter(config -> "llm".equals(config.getConfigType()))
+                .forEach(config -> {
+                    if (config.getApiKey() != null) {
+                        llmConfigMap.put(config.getApiKey(), config);
+                    }
+                });
+
+        // 处理每个agent配置
+        for (SysConfig agentConfig : agentConfigs) {
+            String apiKey = agentConfig.getApiKey();
+            String apiUrl = agentConfig.getApiUrl();
+            Integer configId = agentConfig.getConfigId();
+            Integer userId = agentConfig.getUserId();
+
+            // 检查是否已存在对应的llm配置
+            SysConfig existingLlmConfig = llmConfigMap.get(apiKey);
+
+            // 如果已存在llm配置，直接创建Agent对象返回
+            if (existingLlmConfig != null) {
+                SysAgent difyAgent = new SysAgent();
+                difyAgent.setConfigId(existingLlmConfig.getConfigId());
+                difyAgent.setProvider("xingchen");
+                difyAgent.setApiKey(apiKey);
+                difyAgent.setAgentName(existingLlmConfig.getConfigName());
+                difyAgent.setAgentDesc(existingLlmConfig.getConfigDesc());
+                difyAgent.setIsDefault(existingLlmConfig.getIsDefault());
+                difyAgent.setPublishTime(existingLlmConfig.getCreateTime());
+
+                // 如果前端传入了智能体名称过滤条件，则进行过滤
+                if (StringUtils.hasText(agent.getAgentName())) {
+                    if (difyAgent.getAgentName() != null &&
+                            difyAgent.getAgentName().toLowerCase().contains(agent.getAgentName().toLowerCase())) {
+                        agentList.add(difyAgent);
+                    }
+                } else {
+                    agentList.add(difyAgent);
+                }
+            } else {
+                // 如果不存在llm配置，调用API获取信息并创建新的llm配置
+                SysAgent difyAgent = new SysAgent();
+                difyAgent.setConfigId(configId);
+                difyAgent.setProvider("xingchen");
+                difyAgent.setApiKey(apiKey);
+
+                String name =  "XingChen Agent";
+                String description = "";
+
+                difyAgent.setAgentName(name);
+                difyAgent.setAgentDesc(description);
+
+                // 创建新的llm配置
+                SysConfig newLlmConfig = new SysConfig();
+                newLlmConfig.setUserId(userId);
+                newLlmConfig.setConfigType("llm");
+                newLlmConfig.setProvider("xingchen");
+                newLlmConfig.setApiKey(apiKey);
+                newLlmConfig.setConfigName(name);
+                newLlmConfig.setConfigDesc(description);
+                newLlmConfig.setApiUrl(apiUrl);
+                newLlmConfig.setState(SysDevice.DEVICE_STATE_ONLINE);  // 默认启用
+
+                // 添加到数据库
+                try {
+                    configMapper.add(newLlmConfig);
+                    logger.debug("添加xingchen LLM配置成功: {}", apiKey);
+                    difyAgent.setConfigId(newLlmConfig.getConfigId());
+                } catch (Exception e) {
+                    logger.error("添加xingchen LLM配置失败: {}", e.getMessage());
+                }
+            }
+        }
+
+        return agentList;
+    }
     /**
      * 从Coze API获取智能体列表，并与数据库同步
      * 

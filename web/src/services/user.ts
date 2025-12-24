@@ -18,6 +18,22 @@ export function telLogin(data: { tel: string; code: string }) {
 }
 
 /**
+ * 检查Token有效性
+ * 用于页面刷新时验证登录状态
+ */
+export function checkToken() {
+  return http.get<LoginResponse>(api.user.checkToken)
+}
+
+/**
+ * 刷新Token
+ * 延长登录有效期
+ */
+export function refreshToken() {
+  return http.post<LoginResponse>(api.user.refreshToken)
+}
+
+/**
  * 用户注册
  */
 export function register(data: {
@@ -39,7 +55,7 @@ export function resetPassword(data: {
   code: string
   password: string
 }) {
-  return http.postJSON(api.user.update, data)
+  return http.postJSON(api.user.resetPassword, data)
 }
 
 /**
@@ -74,14 +90,15 @@ export function checkCaptcha(data: { email: string; code: string; type: string }
  * 查询用户列表
  */
 export function queryUsers(params: Partial<UserQueryParams>) {
-  return http.getPage<User>(api.user.queryUsers, params)
+  return http.getPage<User>(api.user.query, params)
 }
 
 /**
  * 更新用户信息
  */
 export function updateUser(data: Partial<UpdateUserParams>) {
-  return http.postJSON(api.user.update, data)
+  const { userId, ...updateData } = data
+  return http.putJSON(`${api.user.update}/${userId}`, updateData)
 }
 
 /**

@@ -1,14 +1,16 @@
 package com.xiaozhi.common.web;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import org.springframework.util.ObjectUtils;
 
 import java.util.HashMap;
 
 /**
  * 处理结果封装
- * 
+ *
  * @author Joey
  */
+@Schema(description = "统一响应结果")
 public class ResultMessage extends HashMap<String, Object> {
 
     /** 状态码 */
@@ -144,14 +146,17 @@ public class ResultMessage extends HashMap<String, Object> {
         return new ResultMessage(code, msg, data);
     }
 
+    @Schema(description = "状态码：200-成功，400-失败，201-特殊状态", example = "200")
     public int getCode() {
         return (int) super.get(CODE_TAG);
     }
 
+    @Schema(description = "返回消息", example = "操作成功")
     public String getMessage() {
         return (String) super.get(MSG_TAG);
     }
 
+    @Schema(description = "返回数据")
     public Object getData() {
         return super.get(DATA_TAG);
     }

@@ -5,6 +5,7 @@ import { message } from 'ant-design-vue'
 import { useTable } from '@/composables/useTable'
 import { useInlineEdit } from '@/composables/useInlineEdit'
 import { useLoadingStore } from '@/store/loading'
+import { useMemoryView } from '@/composables/useMemoryView'
 import { queryDevices, addDevice, updateDevice, deleteDevice, clearDeviceMemory } from '@/services/device'
 import { queryRoles } from '@/services/role'
 import DeviceEditDialog from '@/components/DeviceEditDialog.vue'
@@ -14,6 +15,7 @@ import type { TablePaginationConfig } from 'ant-design-vue'
 
 const { t } = useI18n()
 const loadingStore = useLoadingStore()
+const { navigateToMemory } = useMemoryView()
 
 // 表格和分页
 const {
@@ -164,7 +166,7 @@ const columns = computed(() => [
   {
     title: t('table.action'),
     dataIndex: 'operation',
-    width: 150,
+    width: 200,
     align: 'center',
     fixed: 'right',
   },
@@ -559,7 +561,14 @@ fetchData()
               @edit="() => handleEdit(record.deviceId)"
               @view="() => handleEditWithDialog(record)"
               @delete="() => handleDeleteDevice(record)"
-            />
+            >
+              <!-- 自定义 -->
+              <template #actions>
+                <a @click="() => navigateToMemory({ roleId: record.roleId, deviceId: record.deviceId })">
+                  {{ t('role.memory') }}
+                </a>
+              </template>
+            </TableActionButtons>
           </template>
         </template>
       </a-table>

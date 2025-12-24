@@ -31,7 +31,7 @@ public class PlayMusicFunction implements ToolsGlobalRegistry.GlobalFunction {
                     if (songName == null || songName.isEmpty()) {
                         return "音乐播放失败";
                     }else{
-                        musicService.playMusic(chatSession, songName, null);
+                        musicService.newMusicPlayer(chatSession,songName, null).play();
                         return "尝试播放歌曲《"+songName+"》";
                     }
                 }catch (Exception e){

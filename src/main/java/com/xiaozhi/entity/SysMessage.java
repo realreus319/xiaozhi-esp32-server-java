@@ -7,7 +7,9 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.experimental.Accessors;
 
+import java.math.BigDecimal;
 import java.nio.file.Paths;
+import java.sql.Date;
 import java.text.SimpleDateFormat;
 
 /**
@@ -52,6 +54,36 @@ public class SysMessage extends Base<SysMessage> {
      */
     @Schema(description = "消息内容")
     private String message;
+    
+    /**
+     * tokens数量,对于User Message表示promptTokens，对于Assistant Message表示completionTokens
+     */
+    private Integer tokens;
+    
+    /**
+     * 用户音频时长(秒)
+     */
+    private BigDecimal sttDuration;
+    
+    /**
+     * 语音合成音频时长(秒)
+     */
+    private BigDecimal ttsDuration;
+
+    /**
+     * llm首句响应时间(毫秒)
+     */
+    private Integer ttfsTime;
+
+    /**
+     * 响应时间(毫秒)，从静音结束后开始请求模型到语音合成首次出声
+     */
+    private Integer responseTime;
+
+    /**
+     * 统计日期，用于索引
+     */
+    private Date statDate;
 
     /**
      * 语音文件路径

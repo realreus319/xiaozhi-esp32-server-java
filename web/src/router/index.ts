@@ -49,7 +49,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/',
     component: MainLayout,
-    redirect: '/dashboard',
+    // redirect: '/dashboard', // 在路由守卫中动态处理
     children: [
       {
         path: 'dashboard',
@@ -85,17 +85,6 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
-        path: 'message',
-        name: 'message',
-        component: () => import('../views/MessageView.vue'),
-        meta: {
-          title: 'router.title.message',
-          icon: 'MessageOutlined',
-          requiresAuth: true,
-          permission: 'system:message',
-        },
-      },
-      {
         path: 'role',
         name: 'role',
         component: () => import('../views/RoleView.vue'),
@@ -116,6 +105,17 @@ const routes: RouteRecordRaw[] = [
           parent: 'router.parent.roleManagement',
           requiresAuth: true,
           permission: 'system:prompt-template',
+          hideInMenu: true
+        },
+      },
+      {
+        path: 'memory-management',
+        name: 'memory-management',
+        component: () => import('../views/MemoryManagementView.vue'),
+        meta: {
+          title: 'router.title.memoryManagement',
+          requiresAuth: true,
+          permission: 'system:role',
           hideInMenu: true
         },
       },
@@ -164,7 +164,7 @@ const routes: RouteRecordRaw[] = [
           permission: 'system:config:tts',
         },
       },
-      // 个人设置
+      // 个人中心
       {
         path: 'setting/account',
         name: 'setting-account',
@@ -176,17 +176,18 @@ const routes: RouteRecordRaw[] = [
           permission: 'system:setting',
         },
       },
-      {
-        path: 'setting/config',
-        name: 'setting-config',
-        component: () => import('../views/setting/ConfigView.vue'),
-        meta: {
-          title: 'router.title.personalConfig',
-          parent: 'router.parent.settings',
-          requiresAuth: true,
-          permission: 'system:setting',
-        },
-      },
+      // 个人设置（暂时禁用）
+      // {
+      //   path: 'setting/config',
+      //   name: 'setting-config',
+      //   component: () => import('../views/setting/ConfigView.vue'),
+      //   meta: {
+      //     title: 'router.title.personalConfig',
+      //     parent: 'router.parent.settings',
+      //     requiresAuth: true,
+      //     permission: 'system:setting',
+      //   },
+      // },
     ],
   },
 

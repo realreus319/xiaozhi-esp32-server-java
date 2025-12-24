@@ -8,15 +8,22 @@ import com.xiaozhi.common.web.ResultMessage;
 import com.xiaozhi.common.web.PageFilter;
 import com.xiaozhi.dialogue.stt.factory.SttServiceFactory;
 import com.xiaozhi.dialogue.tts.factory.TtsServiceFactory;
+import com.xiaozhi.dto.param.ConfigAddParam;
+import com.xiaozhi.dto.param.ConfigGetModelsParam;
+import com.xiaozhi.dto.param.ConfigUpdateParam;
+import com.xiaozhi.dto.response.ConfigDTO;
 import com.xiaozhi.entity.SysConfig;
 import com.xiaozhi.service.SysConfigService;
 import com.xiaozhi.utils.CmsUtils;
+import com.xiaozhi.utils.DtoConverter;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 
+import org.springframework.beans.BeanUtils;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -51,19 +58,23 @@ public class ConfigController extends BaseController {
 
     /**
      * 配置查询
-     * 
+     *
      * @param config
      * @return configList
      */
-    @GetMapping("/query")
+    @GetMapping("")
     @ResponseBody
     @Operation(summary = "根据条件查询配置", description = "返回配置信息列表")
-    public ResultMessage query(SysConfig config, HttpServletRequest request) {
+    public ResultMessage list(SysConfig config, HttpServletRequest request) {
         try {
             PageFilter pageFilter = initPageFilter(request);
             List<SysConfig> configList = configService.query(config, pageFilter);
+
+            // 转换为DTO
+            List<ConfigDTO> configDTOList = DtoConverter.toConfigDTOList(configList);
+
             ResultMessage result = ResultMessage.success();
-            result.put("data", new PageInfo<>(configList));
+            result.put("data", new PageInfo<>(configDTOList));
             return result;
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
@@ -73,16 +84,21 @@ public class ConfigController extends BaseController {
 
     /**
      * 配置信息更新
-     * 
-     * @param config
+     *
+     * @param configId 配置ID
+     * @param param 更新参数
      * @return
      */
-    @PostMapping("/update")
+    @PutMapping("/{configId}")
     @ResponseBody
-    @Operation(summary = "更新配置信息", description = "返回更新结果")
-    public ResultMessage update(SysConfig config) {
+    @Operation(summary = "更新配置信息", description = "更新LLM/STT/TTS配置")
+    public ResultMessage update(@PathVariable Integer configId, @Valid @RequestBody ConfigUpdateParam param) {
         try {
+            SysConfig config = new SysConfig();
+            BeanUtils.copyProperties(param, config);
+            config.setConfigId(configId);
             config.setUserId(CmsUtils.getUserId());
+
             SysConfig oldSysConfig = configService.selectConfigById(config.getConfigId());
             int rows = configService.update(config);
             if (rows > 0) {
@@ -95,8 +111,12 @@ public class ConfigController extends BaseController {
                         ttsServiceFactory.removeCache(oldSysConfig);
                     }
                 }
+
+                // 返回更新后的配置信息
+                SysConfig updatedConfig = configService.selectConfigById(configId);
+                return ResultMessage.success(DtoConverter.toConfigDTO(updatedConfig));
             }
-            return ResultMessage.success();
+            return ResultMessage.error("更新失败");
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResultMessage.error();
@@ -105,17 +125,22 @@ public class ConfigController extends BaseController {
 
     /**
      * 添加配置
-     * 
-     * @param config
+     *
+     * @param param 添加参数
      */
-    @PostMapping("/add")
+    @PostMapping("")
     @ResponseBody
-    @Operation(summary = "添加配置信息", description = "返回添加结果")
-    public ResultMessage add(SysConfig config) {
+    @Operation(summary = "添加配置信息", description = "添加新的LLM/STT/TTS配置")
+    public ResultMessage create(@Valid @RequestBody ConfigAddParam param) {
         try {
+            SysConfig config = new SysConfig();
+            BeanUtils.copyProperties(param, config);
             config.setUserId(CmsUtils.getUserId());
+
             configService.add(config);
-            return ResultMessage.success();
+
+            // 返回新增的配置信息(不包含敏感字段)
+            return ResultMessage.success(DtoConverter.toConfigDTO(config));
         } catch (Exception e) {
             logger.error(e.getMessage(), e);
             return ResultMessage.error();
@@ -124,20 +149,20 @@ public class ConfigController extends BaseController {
 
     @PostMapping("/getModels")
     @ResponseBody
-    @Operation(summary = "获取模型列表", description = "返回模型列表")
-    public ResultMessage getModels(SysConfig config) {
+    @Operation(summary = "获取模型列表", description = "从指定API地址获取可用的模型列表")
+    public ResultMessage getModels(@Valid @RequestBody ConfigGetModelsParam param) {
         try {
             RestTemplate restTemplate = new RestTemplate();
             // 设置请求头
             HttpHeaders headers = new HttpHeaders();
-            headers.set("Authorization", "Bearer " + config.getApiKey());
+            headers.set("Authorization", "Bearer " + param.getApiKey());
 
             // 构建请求实体
             HttpEntity<String> entity = new HttpEntity<>(headers);
 
             // 调用 /v1/models 接口，解析为 JSON 字符串
             ResponseEntity<String> response = restTemplate.exchange(
-                    config.getApiUrl() + "/models",
+                    param.getApiUrl() + "/models",
                     HttpMethod.GET,
                     entity,
                     String.class);

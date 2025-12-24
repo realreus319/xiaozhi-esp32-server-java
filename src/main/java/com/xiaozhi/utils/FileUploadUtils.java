@@ -44,7 +44,7 @@ public class FileUploadUtils {
      * @param relativePath 相对路径
      * @param fileName     文件名
      * @param file         文件
-     * @return 文件完整路径
+     * @return 文件相对路径（相对于项目根目录）
      * @throws IOException
      */
     public static String uploadFile(String baseDir, String relativePath, String fileName, MultipartFile file)
@@ -74,7 +74,9 @@ public class FileUploadUtils {
             IOUtils.copy(inputStream, fos);
         }
 
-        return destFile.getAbsolutePath();
+        // 返回相对路径（统一使用正斜杠，便于URL访问）
+        String relativeFilePath = baseDir + File.separator + relativePath + File.separator + fileName;
+        return relativeFilePath.replace(File.separator, "/");
     }
 
     /**

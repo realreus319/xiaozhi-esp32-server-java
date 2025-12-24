@@ -1142,13 +1142,40 @@ export const configTypeMap: Record<string, ConfigTypeInfo> = {
   tts: {
     label: 'config.tts',
     typeOptions: [
-      { label: 'Aliyun', value: 'aliyun', key: '0' },
-      { label: 'Aliyun NLS', value: 'aliyun-nls', key: '1' },
-      { label: 'Volcengine(doubao)', value: 'volcengine', key: '2' },
-      { label: 'Xfyun', value: 'xfyun', key: '3' },
-      { label: 'Minimax', value: 'minimax', key: '4' }
+      { label: 'Tencent', value: 'tencent', key: '0' },
+      { label: 'Aliyun', value: 'aliyun', key: '1' },
+      { label: 'Aliyun NLS', value: 'aliyun-nls', key: '2' },
+      { label: 'Volcengine(doubao)', value: 'volcengine', key: '3' },
+      { label: 'Xfyun', value: 'xfyun', key: '4' },
+      { label: 'Minimax', value: 'minimax', key: '5' }
     ],
     typeFields: {
+      tencent: [
+        {
+          name: 'appId',
+          label: 'App Id',
+          required: true,
+          span: 12,
+          help: '在 https://console.cloud.tencent.com/cam/capi 申请',
+          placeholder: 'your-app-id'
+        },
+        {
+          name: 'apiKey',
+          label: 'Secret Id',
+          required: true,
+          span: 12,
+          help: '腾讯云API密钥ID',
+          placeholder: 'your-secret-id'
+        },
+        {
+          name: 'apiSecret',
+          label: 'Secret Key',
+          required: true,
+          span: 12,
+          help: '腾讯云API密钥Key',
+          placeholder: 'your-secret-key'
+        },
+      ],
       aliyun: [
         { 
           name: 'apiKey', 
@@ -1248,6 +1275,46 @@ export const configTypeMap: Record<string, ConfigTypeInfo> = {
           placeholder: 'your-api-key'
         }
       ],
+    }
+  },
+  voice_clone: {
+    label: 'config.voiceClone',
+    typeFields: {
+      aliyun: [
+        {
+          name: 'configName',
+          label: '音色克隆模型',
+          required: true,
+          inputType: 'select',
+          span: 12,
+          help: '选择音色克隆使用的模型版本',
+          placeholder: '请选择模型',
+          options: [
+            { label: 'CosyVoice-v2', value: 'cosyvoice-v2' },
+            { label: 'CosyVoice-v3-plus', value: 'cosyvoice-v3-plus' }
+          ]
+        },
+        {
+          name: 'apiKey',
+          label: 'API Key',
+          required: true,
+          inputType: 'password',
+          span: 12,
+          help: '在阿里云智能语音交互控制台获取',
+          placeholder: 'your-api-key'
+        }
+      ],
+      volcengine: [
+        {
+          name: 'apiKey',
+          label: 'API Key',
+          required: true,
+          inputType: 'password',
+          span: 12,
+          help: '在火山引擎语音技术控制台获取',
+          placeholder: 'your-api-key'
+        }
+      ]
     }
   }
 };

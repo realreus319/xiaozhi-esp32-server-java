@@ -16,7 +16,7 @@ import java.util.Map;
 /**
  * 创建一个新的对话
  */
-@Component
+// @Component
 public class NewChatFunction implements ToolsGlobalRegistry.GlobalFunction {
 
     ToolCallback toolCallback = FunctionToolCallback

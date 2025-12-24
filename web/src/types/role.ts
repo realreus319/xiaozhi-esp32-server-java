@@ -11,6 +11,9 @@ export type VoiceProvider = 'edge' | 'aliyun' | 'aliyun-nls' | 'volcengine' | 'x
 // 语音性别
 export type VoiceGender = '' | 'male' | 'female'
 
+// 记忆类型
+export type MemoryType = 'window'
+
 // 角色数据
 export interface Role {
   createTime?: string
@@ -40,6 +43,7 @@ export interface Role {
   totalDevice?: number
   ttsPitch?: number // 语音音调(0.5-2.0)
   ttsSpeed?: number // 语音语速(0.5-2.0)
+  memoryType?: MemoryType // 记忆类型
 }
 
 import type { BaseQueryParams } from './api'
@@ -50,8 +54,6 @@ export interface RoleQueryParams extends BaseQueryParams {
   isDefault?: number
 }
 
-// 移除重复的响应类型定义，使用统一的 PageResponse<Role>
-
 // 语音选项
 export interface VoiceOption {
   label: string
@@ -59,6 +61,7 @@ export interface VoiceOption {
   gender: VoiceGender
   provider: VoiceProvider
   ttsId?: number // 关联的TTS配置ID
+  model?: string
 }
 
 // 模型选项（统一LLM和Agent）
@@ -113,8 +116,10 @@ export interface RoleFormData {
   voiceName?: string
   ttsId?: number
   gender?: VoiceGender
-  ttsPitch?: number // 语音音调(0.5-2.0)
-  ttsSpeed?: number // 语音语速(0.5-2.0)
+  ttsPitch?: number
+  ttsSpeed?: number
+  // 记忆类型
+  memoryType?: MemoryType
 }
 
 // 测试语音参数
@@ -123,6 +128,6 @@ export interface TestVoiceParams {
   ttsId: number
   message: string
   provider: string
-  ttsPitch?: number // 语音音调(0.5-2.0)
-  ttsSpeed?: number // 语音语速(0.5-2.0)
+  ttsPitch?: number
+  ttsSpeed?: number
 }

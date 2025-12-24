@@ -5,6 +5,8 @@ import com.xiaozhi.common.exception.UserPasswordNotMatchException;
 import com.xiaozhi.common.exception.UsernameNotFoundException;
 import com.xiaozhi.common.web.ResultMessage;
 import com.xiaozhi.common.web.PageFilter;
+import com.xiaozhi.dto.param.*;
+import com.xiaozhi.dto.response.*;
 import com.xiaozhi.entity.SysAuthRole;
 import com.xiaozhi.entity.SysPermission;
 import com.xiaozhi.entity.SysUser;
@@ -15,6 +17,7 @@ import com.xiaozhi.service.SysUserService;
 import com.xiaozhi.service.SysUserAuthService;
 import com.xiaozhi.service.WxLoginService;
 import com.xiaozhi.service.SysAuthRoleService;
+import com.xiaozhi.utils.DtoConverter;
 import cn.dev33.satoken.annotation.SaIgnore;
 import cn.dev33.satoken.stp.StpUtil;
 import com.xiaozhi.utils.CaptchaUtils;
@@ -25,6 +28,7 @@ import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.annotation.Resource;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.util.ObjectUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -72,126 +76,174 @@ public class UserController extends BaseController {
     private CaptchaUtils captchaUtils;
 
     /**
-     * @param loginRequest 包含用户名和密码的请求体
-     * @return 登录结果
-     * @throws UsernameNotFoundException
-     * @throws UserPasswordNotMatchException
+     * 检查Token是否有效，用于前端页面刷新时验证登录状态
+     */
+    @GetMapping("/check-token")
+    @Operation(summary = "检查Token有效性", description = "验证当前Token是否有效，有效则返回用户信息")
+    public ResultMessage checkToken() {
+        try {
+            // 如果能执行到这里，说明Token有效（已通过Sa-Token拦截器验证）
+            Integer userId = Integer.parseInt(StpUtil.getLoginId().toString());
+            SysUser user = userService.selectUserByUserId(userId);
+
+            if (user == null) {
+                return ResultMessage.error(401, "用户不存在");
+            }
+
+            // 获取角色和权限
+            SysAuthRole role = authRoleService.selectById(user.getRoleId());
+            List<SysPermission> permissions = permissionService.selectByUserId(user.getUserId());
+            List<SysPermission> permissionTree = permissionService.buildPermissionTree(permissions);
+
+            // 返回用户信息
+            LoginResponseDTO response = LoginResponseDTO.builder()
+                .token(StpUtil.getTokenValue())
+                .refreshToken(StpUtil.getTokenValue())
+                .expiresIn((int) (StpUtil.getTokenTimeout()))
+                .userId(user.getUserId())
+                .user(DtoConverter.toUserDTO(user))
+                .role(DtoConverter.toRoleDTO(role))
+                .permissions(DtoConverter.toPermissionDTOList(permissionTree))
+                .build();
+
+            return ResultMessage.success(response);
+        } catch (Exception e) {
+            logger.error("检查Token失败", e);
+            return ResultMessage.error(401, "Token无效或已过期");
+        }
+    }
+
+    /**
+     * 刷新Token，延长登录有效期
+     */
+    @PostMapping("/refresh-token")
+    @Operation(summary = "刷新Token", description = "刷新Token有效期，返回新的Token")
+    public ResultMessage refreshToken() {
+        try {
+            // 获取当前登录用户
+            Integer userId = Integer.parseInt(StpUtil.getLoginId().toString());
+            SysUser user = userService.selectUserByUserId(userId);
+
+            if (user == null) {
+                return ResultMessage.error(401, "用户不存在");
+            }
+
+            // 重新登录，生成新Token
+            StpUtil.logout();
+            StpUtil.login(userId, 2592000);
+            String newToken = StpUtil.getTokenValue();
+
+            // 获取角色和权限
+            SysAuthRole role = authRoleService.selectById(user.getRoleId());
+            List<SysPermission> permissions = permissionService.selectByUserId(user.getUserId());
+            List<SysPermission> permissionTree = permissionService.buildPermissionTree(permissions);
+
+            // 返回新Token和用户信息
+            LoginResponseDTO response = LoginResponseDTO.builder()
+                .token(newToken)
+                .refreshToken(newToken)
+                .expiresIn(2592000)
+                .userId(user.getUserId())
+                .user(DtoConverter.toUserDTO(user))
+                .role(DtoConverter.toRoleDTO(role))
+                .permissions(DtoConverter.toPermissionDTOList(permissionTree))
+                .build();
+
+            return ResultMessage.success(response);
+        } catch (Exception e) {
+            logger.error("刷新Token失败", e);
+            return ResultMessage.error(401, "Token刷新失败，请重新登录");
+        }
+    }
+
+    /**
+     * 用户名密码登录
      */
     @SaIgnore
     @PostMapping("/login")
-    @ResponseBody
-    @Operation(summary = "用户登录", description = "返回登录结果")
-    public ResultMessage login(@RequestBody Map<String, Object> loginRequest, HttpServletRequest request) {
+    @Operation(summary = "用户名密码登录", description = "使用用户名和密码进行登录,返回token、用户信息、角色和权限")
+    public ResultMessage login(@Valid @RequestBody LoginParam param) {
         try {
-            String username = (String) loginRequest.get("username");
-            String password = (String) loginRequest.get("password");
-
-            userService.login(username, password);
-            SysUser user = userService.selectUserByUsername(username);
+            userService.login(param.getUsername(), param.getPassword());
+            SysUser user = userService.selectUserByUsername(param.getUsername());
 
             // Sa-Token登录
-            StpUtil.login(user.getUserId(), 2592000);  // 30天过期
-
-            // 获取Token
+            StpUtil.login(user.getUserId(), 2592000);
             String token = StpUtil.getTokenValue();
 
-            // 获取用户角色
+            // 获取角色和权限
             SysAuthRole role = authRoleService.selectById(user.getRoleId());
-
-            // 获取用户权限
             List<SysPermission> permissions = permissionService.selectByUserId(user.getUserId());
-
-            // 构建权限树
             List<SysPermission> permissionTree = permissionService.buildPermissionTree(permissions);
 
-            Map<String, Object> result = new HashMap<>();
-            result.put("token", token);
-            result.put("refreshToken", token); // Sa-Token 使用相同token作为refresh token
-            result.put("expiresIn", 2592000);
-            result.put("userId", user.getUserId());
-            result.put("user", user);
-            result.put("role", role);
-            result.put("permissions", permissionTree);
+            // 转换为DTO
+            LoginResponseDTO response = LoginResponseDTO.builder()
+                .token(token)
+                .refreshToken(token)
+                .expiresIn(2592000)
+                .userId(user.getUserId())
+                .user(DtoConverter.toUserDTO(user))
+                .role(DtoConverter.toRoleDTO(role))
+                .permissions(DtoConverter.toPermissionDTOList(permissionTree))
+                .build();
 
-            return ResultMessage.success(result);
+            return ResultMessage.success(response);
         } catch (UsernameNotFoundException e) {
             return ResultMessage.error("用户不存在");
         } catch (UserPasswordNotMatchException e) {
             return ResultMessage.error("密码错误");
         } catch (Exception e) {
-            logger.info(e.getMessage(), e);
+            logger.error("登录失败", e);
             return ResultMessage.error("操作失败");
         }
     }
 
     /**
      * 手机号验证码登录
-     *
-     * @param loginRequest 包含手机号和验证码的请求体
-     * @return 登录结果
      */
     @SaIgnore
     @PostMapping("/tel-login")
-    @ResponseBody
-    @Operation(summary = "手机号验证码登录", description = "返回登录结果")
-    public ResultMessage telLogin(@RequestBody Map<String, Object> loginRequest, HttpServletRequest request) {
+    @Operation(summary = "手机号验证码登录", description = "使用手机号和验证码登录,未注册返回201状态码")
+    public ResultMessage telLogin(@Valid @RequestBody TelLoginParam param) {
         try {
-            String tel = (String) loginRequest.get("tel");
-            String code = (String) loginRequest.get("code");
-
-            // 验证手机号格式
-            if (!captchaUtils.isValidPhoneNumber(tel)) {
-                return ResultMessage.error("手机号格式不正确");
-            }
-
-            if (!StringUtils.hasText(code)) {
-                return ResultMessage.error("验证码不能为空");
-            }
-
-            // 验证验证码是否正确
+            // 验证验证码
             SysUser codeUser = new SysUser();
-            codeUser.setEmail(tel);  // 注意：这里复用了email字段存储手机号
-            codeUser.setCode(code);
+            codeUser.setEmail(param.getTel());
+            codeUser.setCode(param.getCode());
             int row = userService.queryCaptcha(codeUser);
             if (row < 1) {
                 return ResultMessage.error("验证码错误或已过期");
             }
 
-            // 根据手机号查询用户
-            SysUser user = userService.selectUserByTel(tel);
-
-            // 如果用户不存在，返回状态码201，提示需要注册
+            // 查询用户
+            SysUser user = userService.selectUserByTel(param.getTel());
             if (user == null) {
                 return new ResultMessage(201, "该手机号未注册，请先注册", null);
             }
 
             // Sa-Token登录
-            StpUtil.login(user.getUserId(), 2592000);  // 30天过期
-
-            // 获取Token
+            StpUtil.login(user.getUserId(), 2592000);
             String token = StpUtil.getTokenValue();
 
-            // 获取用户角色
+            // 获取角色和权限
             SysAuthRole role = authRoleService.selectById(user.getRoleId());
-
-            // 获取用户权限
             List<SysPermission> permissions = permissionService.selectByUserId(user.getUserId());
-
-            // 构建权限树
             List<SysPermission> permissionTree = permissionService.buildPermissionTree(permissions);
 
-            Map<String, Object> result = new HashMap<>();
-            result.put("token", token);
-            result.put("refreshToken", token); // Sa-Token 使用相同token作为refresh token
-            result.put("expiresIn", 2592000);
-            result.put("userId", user.getUserId());
-            result.put("user", user);
-            result.put("role", role);
-            result.put("permissions", permissionTree);
+            // 转换为DTO
+            LoginResponseDTO response = LoginResponseDTO.builder()
+                .token(token)
+                .refreshToken(token)
+                .expiresIn(2592000)
+                .userId(user.getUserId())
+                .user(DtoConverter.toUserDTO(user))
+                .role(DtoConverter.toRoleDTO(role))
+                .permissions(DtoConverter.toPermissionDTOList(permissionTree))
+                .build();
 
-            return ResultMessage.success(result);
+            return ResultMessage.success(response);
         } catch (Exception e) {
-            logger.error("手机号登录失败: {}", e.getMessage(), e);
+            logger.error("手机号登录失败", e);
             return ResultMessage.error("登录失败，请稍后重试");
         }
     }
@@ -315,74 +367,48 @@ public class UserController extends BaseController {
     }
 
     /**
-     * 新增用户
-     *
-     * @param loginRequest 包含用户信息的请求体
-     * @return 添加结果
+     * 用户注册
      */
     @SaIgnore
-    @PostMapping("/add")
-    @ResponseBody
-    @Operation(summary = "新增用户", description = "返回添加结果")
-    public ResultMessage add(@RequestBody Map<String, Object> loginRequest, HttpServletRequest request) {
+    @PostMapping("")
+    @Operation(summary = "用户注册", description = "新用户注册,需提供验证码")
+    public ResultMessage create(@Valid @RequestBody RegisterParam param) {
         try {
-            String username = (String) loginRequest.get("username");
-            String email = (String) loginRequest.get("email");
-            String password = (String) loginRequest.get("password");
-            String code = (String) loginRequest.get("code");
-            String name = (String) loginRequest.get("name");
-            String tel = (String) loginRequest.get("tel");
-            SysUser user = new SysUser();
-            user.setCode(code);
-            user.setEmail(email);
-            user.setTel(tel);
-            int row = userService.queryCaptcha(user);
-            if (1 > row)
+            // 验证验证码
+            SysUser codeUser = new SysUser();
+            codeUser.setEmail(param.getEmail() != null ? param.getEmail() : param.getTel());
+            codeUser.setTel(param.getTel());
+            codeUser.setCode(param.getCode());
+            int row = userService.queryCaptcha(codeUser);
+            if (row < 1) {
                 return ResultMessage.error("无效验证码");
-                
-            user.setUsername(username);
-            user.setName(name);
-            String newPassword = authenticationService.encryptPassword(password);
-            user.setPassword(newPassword);
-            
-            if (0 < userService.add(user)) {
-                return ResultMessage.success(user);
             }
-            return ResultMessage.error();
-        } catch (Exception e) {
-            logger.error(e.getMessage(), e);
-            return ResultMessage.error();
-        }
-    }
 
-    /**
-     * 用户信息查询
-     * 
-     * @param username 用户名
-     * @return 用户信息
-     */
-    @GetMapping("/query")
-    @ResponseBody
-    @Operation(summary = "根据用户名查询用户信息", description = "返回用户信息")
-    public ResultMessage query(@Parameter(description = "用户名") String username) {
-        try {
-            SysUser user = userService.query(username);
-            ResultMessage result = ResultMessage.success();
-            result.put("data", user);
-            return result;
+            // 创建用户
+            SysUser user = new SysUser();
+            user.setUsername(param.getUsername());
+            user.setName(param.getName());
+            user.setEmail(param.getEmail());
+            user.setTel(param.getTel());
+            user.setPassword(authenticationService.encryptPassword(param.getPassword()));
+
+            if (userService.add(user) > 0) {
+                return ResultMessage.success(DtoConverter.toUserDTO(user));
+            }
+            return ResultMessage.error("注册失败");
         } catch (Exception e) {
-            logger.error(e.getMessage(), e);
-            return ResultMessage.error();
+            logger.error("注册失败", e);
+            return ResultMessage.error("注册失败");
         }
     }
 
     /**
      * 查询用户列表
-     * 
+     *
      * @param user 查询条件
      * @return 用户列表
      */
-    @GetMapping("/queryUsers")
+    @GetMapping("")
     @ResponseBody
     @Operation(summary = "根据条件查询用户信息列表", description = "返回用户信息列表")
     public ResultMessage queryUsers(SysUser user, HttpServletRequest request) {
@@ -400,165 +426,153 @@ public class UserController extends BaseController {
 
     /**
      * 用户信息修改
-     *
-     * @param loginRequest 包含用户信息的请求体
-     * @return 修改结果
      */
-    @PostMapping("/update")
-    @ResponseBody
-    @Operation(summary = "修改用户信息", description = "返回修改结果")
-    public ResultMessage update(@RequestBody Map<String, Object> loginRequest) {
+    @PutMapping("/{userId}")
+    @Operation(summary = "修改用户信息", description = "更新用户个人信息")
+    public ResultMessage update(@PathVariable Integer userId, @Valid @RequestBody UserUpdateParam param) {
         try {
-            String username = (String) loginRequest.get("username");
-            String email = (String) loginRequest.get("email");
-            String tel = (String) loginRequest.get("tel");
-            String password = (String) loginRequest.get("password");
-            String name = (String) loginRequest.get("name");
-            String avatar = (String) loginRequest.get("avatar");
-            
-            SysUser userQuery = new SysUser();
-
-            if (StringUtils.hasText(username)) {
-                userQuery = userService.selectUserByUsername(username);
-                if (ObjectUtils.isEmpty(userQuery)) {
-                    return ResultMessage.error("无此用户，更新失败");
-                }
+            SysUser user = userService.selectUserByUserId(userId);
+            if (ObjectUtils.isEmpty(user)) {
+                return ResultMessage.error("无此用户，更新失败");
             }
 
-            if (StringUtils.hasText(email)) {
-                // 检查邮箱是否被其他用户使用
-                SysUser existingUser = userService.selectUserByEmail(email);
-                if (!ObjectUtils.isEmpty(existingUser) && !existingUser.getUserId().equals(userQuery.getUserId())) {
+            // 检查邮箱
+            if (StringUtils.hasText(param.getEmail())) {
+                SysUser existingUser = userService.selectUserByEmail(param.getEmail());
+                if (!ObjectUtils.isEmpty(existingUser) && !existingUser.getUserId().equals(user.getUserId())) {
                     return ResultMessage.error("邮箱已被其他用户绑定，更新失败");
                 }
-                userQuery.setEmail(email);
+                user.setEmail(param.getEmail());
             }
 
-            if (StringUtils.hasText(tel)) {
-                // 检查手机号是否被其他用户使用
-                SysUser existingUser = userService.selectUserByTel(tel);
-                if (!ObjectUtils.isEmpty(existingUser) && !existingUser.getUserId().equals(userQuery.getUserId())) {
+            // 检查手机号
+            if (StringUtils.hasText(param.getTel())) {
+                SysUser existingUser = userService.selectUserByTel(param.getTel());
+                if (!ObjectUtils.isEmpty(existingUser) && !existingUser.getUserId().equals(user.getUserId())) {
                     return ResultMessage.error("手机号已被其他用户绑定，更新失败");
                 }
-                userQuery.setTel(tel);
+                user.setTel(param.getTel());
             }
 
-            if (StringUtils.hasText(password)) {
-                String newPassword = authenticationService.encryptPassword(password);
-                userQuery.setPassword(newPassword);
+            // 更新其他字段
+            if (StringUtils.hasText(param.getPassword())) {
+                user.setPassword(authenticationService.encryptPassword(param.getPassword()));
+            }
+            if (StringUtils.hasText(param.getAvatar())) {
+                user.setAvatar(param.getAvatar());
+            }
+            if (StringUtils.hasText(param.getName())) {
+                user.setName(param.getName());
             }
 
-            if (StringUtils.hasText(avatar)) {
-                userQuery.setAvatar(avatar);
+            if (userService.update(user) > 0) {
+                SysUser updatedUser = userService.selectUserByUserId(userId);
+                return ResultMessage.success(DtoConverter.toUserDTO(updatedUser));
             }
-
-            if (StringUtils.hasText(name)) {
-                userQuery.setName(name);
-            }
-            
-            // if (!StringUtils.hasText(avatar) && StringUtils.hasText(name)) {
-            //     userQuery.setAvatar(ImageUtils.GenerateImg(name));
-            // }
-
-            if (0 < userService.update(userQuery)) {
-                // 返回更新后的完整用户信息，供前端使用
-                SysUser updatedUser = userService.selectUserByUsername(username);
-                return ResultMessage.success(updatedUser);
-            }
-            return ResultMessage.error();
+            return ResultMessage.error("更新失败");
         } catch (Exception e) {
-            logger.error(e.getMessage(), e);
-            return ResultMessage.error();
+            logger.error("更新用户信息失败", e);
+            return ResultMessage.error("更新失败");
+        }
+    }
+
+    /**
+     * 重置密码（忘记密码场景）
+     *
+     * @param param 重置密码参数（邮箱 + 验证码 + 新密码）
+     * @return 重置结果
+     */
+    @SaIgnore
+    @PostMapping("/resetPassword")
+    @Operation(summary = "重置密码", description = "通过邮箱验证码重置密码，无需登录")
+    public ResultMessage resetPassword(@Valid @RequestBody ResetPasswordParam param) {
+        try {
+            // 1. 验证验证码
+            SysUser codeUser = new SysUser();
+            codeUser.setEmail(param.getEmail());
+            codeUser.setCode(param.getCode());
+            int row = userService.queryCaptcha(codeUser);
+            if (row < 1) {
+                return ResultMessage.error("验证码错误或已过期");
+            }
+
+            // 2. 根据邮箱查找用户
+            SysUser user = userService.selectUserByEmail(param.getEmail());
+            if (ObjectUtils.isEmpty(user)) {
+                return ResultMessage.error("该邮箱未注册");
+            }
+
+            // 3. 更新密码
+            user.setPassword(authenticationService.encryptPassword(param.getPassword()));
+            if (userService.update(user) > 0) {
+                return ResultMessage.success("密码重置成功");
+            }
+            return ResultMessage.error("密码重置失败");
+        } catch (Exception e) {
+            logger.error("重置密码失败", e);
+            return ResultMessage.error("密码重置失败");
         }
     }
 
     /**
      * 邮箱验证码发送
-     *
-     * @param requestBody 包含邮箱和类型的请求体
-     * @return 发送结果
      */
     @SaIgnore
     @PostMapping("/sendEmailCaptcha")
-    @ResponseBody
-    @Operation(summary = "发送邮箱验证码", description = "返回发送结果")
-    public ResultMessage sendEmailCaptcha(
-        @RequestBody(required = false) Map<String, Object> requestBody,
-        HttpServletRequest request) {
+    @Operation(summary = "发送邮箱验证码", description = "向指定邮箱发送验证码,用于注册或找回密码")
+    public ResultMessage sendEmailCaptcha(@Valid @RequestBody SendCaptchaParam param) {
         try {
-            String email = (String) requestBody.get("email");
-            String type = (String) requestBody.get("type");
-
-            // 验证邮箱格式
-            if (!captchaUtils.isValidEmail(email)) {
-                return ResultMessage.error("邮箱格式不正确");
+            // 找回密码模式检查邮箱是否已注册
+            if ("forget".equals(param.getType())) {
+                SysUser user = userService.selectUserByEmail(param.getEmail());
+                if (ObjectUtils.isEmpty(user)) {
+                    return ResultMessage.error("该邮箱未注册");
+                }
             }
 
-            // 如果是找回密码，检查邮箱是否已注册
-            SysUser user = userService.selectUserByEmail(email);
-            if ("forget".equals(type) && ObjectUtils.isEmpty(user)) {
-                return ResultMessage.error("该邮箱未注册");
-            }
+            // 生成并发送验证码
+            SysUser code = userService.generateCode(new SysUser().setEmail(param.getEmail()));
+            CaptchaUtils.CaptchaResult result = captchaUtils.sendEmailCaptcha(param.getEmail(), code.getCode());
 
-            // 生成验证码
-            SysUser code = userService.generateCode(new SysUser().setEmail(email));
-            
-            // 使用统一的验证码工具类发送邮件
-            CaptchaUtils.CaptchaResult result = captchaUtils.sendEmailCaptcha(email, code.getCode());
-            
             if (result.isSuccess()) {
                 return ResultMessage.success();
             } else {
                 return ResultMessage.error(result.getMessage());
             }
         } catch (Exception e) {
-            logger.error("发送验证码邮件失败: " + e.getMessage(), e);
+            logger.error("发送验证码邮件失败", e);
             return ResultMessage.error("发送失败，请稍后重试");
         }
     }
     
     /**
      * 短信验证码发送
-     *
-     * @param requestBody 包含手机号和类型的请求体
-     * @return 发送结果
      */
     @SaIgnore
     @PostMapping("/sendSmsCaptcha")
-    @ResponseBody
-    @Operation(summary = "发送短信验证码", description = "返回发送结果")
-    public ResultMessage sendSmsCaptcha(
-        @RequestBody(required = false) Map<String, Object> requestBody,
-        HttpServletRequest request) {
+    @Operation(summary = "发送短信验证码", description = "向指定手机号发送验证码,用于注册、登录或找回密码")
+    public ResultMessage sendSmsCaptcha(@Valid @RequestBody SendCaptchaParam param) {
         try {
-            String tel = (String) requestBody.get("tel");
-            String type = (String) requestBody.get("type");
-
-            // 验证手机号格式
-            if (!captchaUtils.isValidPhoneNumber(tel)) {
-                return ResultMessage.error("手机号格式不正确");
+            // 找回密码模式检查手机号是否已注册
+            if ("forget".equals(param.getType())) {
+                SysUser user = userService.selectUserByTel(param.getTel());
+                if (ObjectUtils.isEmpty(user)) {
+                    return ResultMessage.error("该手机号未注册");
+                }
             }
 
-            // 如果是找回密码，检查手机号是否已注册
-            SysUser user = userService.selectUserByTel(tel);
-            if ("forget".equals(type) && ObjectUtils.isEmpty(user)) {
-                return ResultMessage.error("该手机号未注册");
-            }
-
-            // 生成验证码并保存到数据库
-            SysUser codeUser = new SysUser().setEmail(tel);
+            // 生成并发送验证码
+            SysUser codeUser = new SysUser().setEmail(param.getTel());
             SysUser code = userService.generateCode(codeUser);
-            
-            // 使用统一的验证码工具类发送短信
-            CaptchaUtils.CaptchaResult result = captchaUtils.sendSmsCaptcha(tel, code.getCode());
-            
+            CaptchaUtils.CaptchaResult result = captchaUtils.sendSmsCaptcha(param.getTel(), code.getCode());
+
             if (result.isSuccess()) {
                 return ResultMessage.success();
             } else {
                 return ResultMessage.error(result.getMessage());
             }
         } catch (Exception e) {
-            logger.error("发送短信验证码失败: {}", e.getMessage(), e);
+            logger.error("发送短信验证码失败", e);
             return ResultMessage.error("短信发送失败，请联系管理员");
         }
     }

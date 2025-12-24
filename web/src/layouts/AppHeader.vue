@@ -181,10 +181,12 @@ function handleThemeChange(theme: string) {
               <UserOutlined />
               <span class="menu-text">{{ t('common.personalCenter') }}</span>
             </a-menu-item>
+            <!-- 个人设置（暂时禁用）
             <a-menu-item @click="() => goToSettings()">
               <SettingOutlined />
               <span class="menu-text">{{ t('common.personalSettings') }}</span>
             </a-menu-item>
+            -->
             <a-menu-divider />
             <a-menu-item @click="() => handleLogout()">
               <LogoutOutlined />

@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { message as antMessage } from 'ant-design-vue'
+import { message as antMessage, Modal } from 'ant-design-vue'
 import { useI18n } from 'vue-i18n'
 import type { FormInstance, TableColumnsType } from 'ant-design-vue'
 import { useConfigManager } from '@/composables/useConfigManager'
 import TableActionButtons from '@/components/TableActionButtons.vue'
-import type { ConfigType, Config, ConfigField, ModelType } from '@/types/config'
+import type { ConfigType, Config, ConfigField } from '@/types/config'
 import { addConfig, updateConfig } from '@/services/config'
 
 const { t } = useI18n()
@@ -43,7 +43,7 @@ const formData = ref<Partial<Config>>({
   configName: undefined,
   configDesc: undefined,
   modelType: 'chat',
-  isDefault: '0',
+  isDefault: false,
   apiKey: undefined,
   apiUrl: undefined,
   appId: undefined,
@@ -172,10 +172,10 @@ function handleEdit(record: Config) {
   currentType.value = record.provider || ''
   activeTabKey.value = '2'
 
-  // 设置表单值
-  formData.value = { 
+  // 设置表单值，将后端的 string ('0'/'1') 转换为 boolean
+  formData.value = {
     ...record,
-    isDefault: props.configType != 'tts' ? record.isDefault : '0'
+    isDefault: props.configType != 'tts' ? record.isDefault === '1' : false
   }
 
   // LLM 更新模型选项
@@ -200,10 +200,8 @@ async function handleSubmit() {
       configType: props.configType,
     }
 
-    // 处理 isDefault
-    if (props.configType !== 'tts') {
-      submitData.isDefault = formData.value.isDefault == '1' ? '1' : '0'
-    }
+    // 处理 isDefault：将 boolean 转换为后端需要的 string enum ('0'/'1')
+    submitData.isDefault = formData.value.isDefault ? '1' : '0'
 
     // LLM 特殊验证
     if (props.configType === 'llm') {
@@ -219,9 +217,20 @@ async function handleSubmit() {
       )
       const isValid = validModels.some((m: any) => m.llm_name === submitData.configName)
       
+      // 如果模型名称不存在，则提示用户是否继续
       if (!isValid && validModels.length > 0) {
-        antMessage.error(t('config.modelNameInvalid', { name: submitData.configName }))
-        return
+        try {
+          await Modal.confirm({
+            title: t('common.confirmSubmit'),
+            content: t('config.modelNameInvalid', { name: submitData.configName }),
+            okText: t('common.confirm'),
+            cancelText: t('common.cancel'),
+          })
+          // 用户点击确认，继续执行
+        } catch {
+          // 用户点击取消，中断流程
+          return
+        }
       }
     }
 
@@ -264,7 +273,7 @@ function resetForm() {
     configName: undefined,
     configDesc: undefined,
     modelType: 'chat',
-    isDefault: '0',
+    isDefault: false,
     apiKey: undefined,
     apiUrl: undefined,
     appId: undefined,
@@ -566,12 +575,12 @@ fetchData()
                   <a-form-item
                     :label="field.label"
                     :name="field.name"
-                    :rules="[{ required: field.required, message: t('config.enterField', { field: field.label }) }]"
+                    :rules="[{ required: editingConfigId && ['apiKey', 'apiSecret', 'ak', 'sk'].includes(field.name) ? false : field.required, message: t('config.enterField', { field: field.label }) }]"
                     style="margin-bottom: 24px"
                   >
                     <a-input
                       v-model:value="formData[field.name]"
-                      :placeholder="field.placeholder || t('config.enterField', { field: field.label })"
+                      :placeholder="editingConfigId && ['apiKey', 'apiSecret', 'ak', 'sk'].includes(field.name) ? '不修改请留空' : (field.placeholder || t('config.enterField', { field: field.label }))"
                       :type="field.inputType || 'text'"
                     >
                       <template v-if="field.suffix" #suffix>

@@ -50,6 +50,11 @@ request.interceptors.request.use(
 // 响应拦截器
 request.interceptors.response.use(
   (response: AxiosResponse<ApiResponse>) => {
+    // 如果是 blob 类型的响应，直接返回，不做业务处理
+    if (response.config.responseType === 'blob') {
+      return response
+    }
+
     const { data } = response
 
     // 处理业务错误码
@@ -58,7 +63,7 @@ request.interceptors.response.use(
       const userStore = useUserStore()
       userStore.clearUserInfo()
       userStore.clearToken()
-      
+
       message.error({
         content: '登录过期，请重新登录！',
         key: 'auth-error',
@@ -88,7 +93,7 @@ request.interceptors.response.use(
         const userStore = useUserStore()
         userStore.clearUserInfo()
         userStore.clearToken()
-        
+
         // 使用相同的key避免重复显示
         message.error({
           content: '登录过期，请重新登录！',
@@ -170,6 +175,18 @@ export const http = {
    */
   putJSON<T = unknown>(url: string, data?: Record<string, unknown>): Promise<DataResponse<T>> {
     return request.put(url, data, {
+      headers: {
+        'Content-Type': 'application/json;charset=UTF-8',
+      },
+    })
+  },
+
+  /**
+   * DELETE 请求（JSON 格式）- 通用数据响应
+   */
+  deleteJSON<T = unknown>(url: string, data?: Record<string, unknown> | unknown[]): Promise<DataResponse<T>> {
+    return request.delete(url, {
+      data,
       headers: {
         'Content-Type': 'application/json;charset=UTF-8',
       },

@@ -65,9 +65,9 @@ export function setupErrorHandler(app: App) {
     event.preventDefault()
 
     const reason = event.reason
-    
+
     if (
-      reason?.name === 'CanceledError' || 
+      reason?.name === 'CanceledError' ||
       reason?.code === 'ERR_CANCELED' ||
       reason?.message?.includes('canceled') ||
       reason?.message?.includes('aborted') ||
@@ -84,6 +84,29 @@ export function setupErrorHandler(app: App) {
       reason?.message?.includes('404')
     ) {
       console.debug('音频文件不存在（正常行为）:', reason.message)
+      return
+    }
+
+    // 检测动态导入失败（通常是因为部署了新版本，旧文件已被删除）
+    if (
+      reason?.message?.includes('Failed to fetch dynamically imported module') ||
+      (reason?.message?.includes('Failed to fetch') && reason?.message?.match(/\.js/))
+    ) {
+      console.warn('动态模块加载失败，可能是页面版本过期:', reason.message)
+
+      message.warning({
+        content: '页面版本已更新，即将自动刷新...',
+        duration: 2,
+        onClose: () => {
+          window.location.reload()
+        }
+      })
+
+      // 2秒后自动刷新页面
+      setTimeout(() => {
+        window.location.reload()
+      }, 2000)
+
       return
     }
 

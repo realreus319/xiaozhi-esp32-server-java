@@ -36,7 +36,8 @@ public class MiniMaxTtsService implements TtsService {
     private final Float speed;
 
     private final OkHttpClient client = HttpUtil.client;
-    private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+    public static final String APPLICATION_JSON_CHARSET_UTF_8 = "application/json; charset=utf-8";
+    private static final MediaType JSON = MediaType.parse(APPLICATION_JSON_CHARSET_UTF_8);
 
     public MiniMaxTtsService(SysConfig config, String voiceName, Float pitch, Float speed, String outputPath) {
         this.groupId = config.getAppId();
@@ -50,6 +51,21 @@ public class MiniMaxTtsService implements TtsService {
     @Override
     public String getProviderName() {
         return PROVIDER_NAME;
+    }
+
+    @Override
+    public String getVoiceName() {
+        return voiceName;
+    }
+
+    @Override
+    public Float getSpeed() {
+        return speed;
+    }
+
+    @Override
+    public Float getPitch() {
+        return pitch;
     }
 
     @Override
@@ -122,11 +138,17 @@ public class MiniMaxTtsService implements TtsService {
         private String model;
         private String text;
         private boolean stream = false;
+        private StreamOptions streamOptions = new StreamOptions();
         private String languageBoost = "auto";
         private String outputFormat = "hex";
         private VoiceSetting voiceSetting;
         private AudioSetting audioSetting;
 
+        @Data
+        public static class StreamOptions{
+            @JsonProperty("exclude_aggregated_audio")
+            boolean excludeAggregatedAudio= true;
+        }
         @Data
         @Accessors(chain = true)
         public static class VoiceSetting {

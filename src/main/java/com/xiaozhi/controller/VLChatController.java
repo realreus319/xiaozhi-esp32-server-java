@@ -51,6 +51,7 @@ public class VLChatController extends BaseController {
             logger.info("用户authorization：{}", authorization);
             //下发的是session
             String sessionId = authorization.substring(7);
+
             ChatSession session = sessionManager.getSession(sessionId);
             if (session == null) {
                 return "session不存在";

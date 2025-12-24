@@ -18,21 +18,20 @@ export function getResourceUrl(path?: string): string | undefined {
   if (!path.startsWith('/')) {
     path = '/' + path
   }
-  
-  // 开发环境下，需要使用完整的后端地址
-  if (import.meta.env.DEV) {
-    // 开发环境下，我们需要指定后端地址
-    const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8091'
-    
+
+  // 使用完整的后端地址（开发和生产环境都需要）
+  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8091'
+
+  if (backendUrl) {
     // 移除开头的斜杠，因为我们要将完整的URL传给组件
     if (path.startsWith('/')) {
       path = path.substring(1)
     }
-    
+
     // 构建完整的URL
     return `${backendUrl}/${path}`
   }
-  
-  // 生产环境下，直接使用相对路径，由Nginx代理处理
+
+  // 如果没有配置后端URL，返回相对路径
   return path
 }

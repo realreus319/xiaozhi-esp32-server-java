@@ -1,11 +1,10 @@
 package com.xiaozhi.utils;
 
 import cn.hutool.core.util.StrUtil;
-import lombok.Data;
+import io.jsonwebtoken.lang.Assert;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -223,10 +222,11 @@ public class EmojiUtils {
      * @param text 输入的句子
      * @return 返回包含处理后句子和表情列表的对象
      */
-    public static EmoSentence processSentence(String text) {
+    public static String processSentence(String text, List<String> moods) {
+        Assert.notNull(moods, "moods cannot be null");
+        Assert.hasText(text, "text cannot be empty");
         text = cleanText(text);
         StringBuilder cleanedText = new StringBuilder();
-        List<String> moods = new ArrayList<>();
 
         int length = text.length();
         for (int i = 0; i < length;) {
@@ -250,56 +250,7 @@ public class EmojiUtils {
         // 过滤颜文字
         String filteredText = filterKaomoji(cleanedText.toString().trim());
         
-        return new EmoSentence(text, filteredText, moods);
+        return  filteredText;
     }
 
-    /**
-     * 表情处理后的句子对象
-     */
-    @Data
-    public static class EmoSentence {
-
-        private final String sentence;
-
-        private final String ttsSentence;
-
-        private final List<String> moods;
-
-        private final boolean audioCleanup;
-
-        /**
-         * 构造函数
-         *
-         * @param sentence     原句子
-         * @param ttsSentence  处理后的句子
-         * @param audioCleanup 是否清理音频
-         */
-        public EmoSentence(String sentence, String ttsSentence, boolean audioCleanup) {
-            this.sentence = sentence;
-            this.ttsSentence = ttsSentence;
-            this.audioCleanup = audioCleanup;
-            this.moods = new ArrayList<>(); // 初始化空列表
-        }
-
-        /**
-         * 构造函数
-         *
-         * @param sentence    原句子
-         * @param ttsSentence 处理后的句子
-         * @param moods       情感词列表
-         */
-        public EmoSentence(String sentence, String ttsSentence, List<String> moods) {
-            this.sentence = sentence;
-            this.ttsSentence = ttsSentence;
-            this.moods = new ArrayList<>(moods); // 创建副本避免外部修改
-            this.audioCleanup = true;
-        }
-        
-        /**
-         * 获取情感词列表的不可修改副本
-         */
-        public List<String> getMoods() {
-            return Collections.unmodifiableList(moods);
-        }
-    }
 }

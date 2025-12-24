@@ -6,6 +6,7 @@ import com.xiaozhi.dialogue.llm.memory.Conversation;
 import com.xiaozhi.dialogue.llm.memory.ConversationFactory;
 import com.xiaozhi.dialogue.llm.tool.ToolCallStringResultConverter;
 import com.xiaozhi.dialogue.llm.tool.ToolsGlobalRegistry;
+import com.xiaozhi.dialogue.llm.tool.XiaozhiToolMetadata;
 import com.xiaozhi.entity.SysDevice;
 import com.xiaozhi.entity.SysRole;
 import com.xiaozhi.service.SysDeviceService;
@@ -16,7 +17,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ToolContext;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.ai.tool.function.FunctionToolCallback;
-import org.springframework.ai.tool.metadata.ToolMetadata;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -27,7 +27,7 @@ import java.util.stream.Collectors;
 /**
  * 通过语音切换角色函数
  */
-@Component
+// @Component
 public class ChangeRoleFunction implements ToolsGlobalRegistry.GlobalFunction {
     private static final Logger logger = LoggerFactory.getLogger(ChangeRoleFunction.class);
     @Resource
@@ -57,7 +57,7 @@ public class ChangeRoleFunction implements ToolsGlobalRegistry.GlobalFunction {
 
                             if(changedRole.isPresent()){
                                 SysRole role = changedRole.get();
-                                sysDevice.setRoleId(role.getRoleId());//测试，固定角色
+                                sysDevice.setRoleId(role.getRoleId());
                                 sysDeviceService.update(sysDevice);
                                 // 切换了角色，需要更换Conversation
                                 if(chatSession.getConversation()!=null){
@@ -74,7 +74,7 @@ public class ChangeRoleFunction implements ToolsGlobalRegistry.GlobalFunction {
                             return "角色切换异常";
                         }
                     })
-                    .toolMetadata(ToolMetadata.builder().returnDirect(true).build())
+                    .toolMetadata(new XiaozhiToolMetadata(true, true))
                     .description("当用户想切换角色/助手名字时调用,可选的角色名称列表：" + getRoleList(roleList)
                             + ". 调用前需要先把所有角色名称告知用户,用户告诉你角色名称进行切换.")
                     .inputSchema("""

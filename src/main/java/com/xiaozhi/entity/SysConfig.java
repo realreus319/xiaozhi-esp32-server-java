@@ -24,7 +24,8 @@ public class SysConfig extends Base<SysConfig> {
         chat("chat"),
         vision("vision"),
         intent("intent"),
-        embedding("embedding");
+        embedding("embedding"),
+        director("director");
 
         @JsonValue
         private final String value;

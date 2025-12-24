@@ -14,6 +14,21 @@ public interface TtsService {
   String getProviderName();
 
   /**
+   * 获取音色名称
+   */
+  String getVoiceName();
+
+  /**
+   * 获取语速
+   */
+  Float getSpeed();
+
+  /**
+   * 获取音调
+   */
+  Float getPitch();
+
+  /**
    * 音频格式
    */
   default String audioFormat() {

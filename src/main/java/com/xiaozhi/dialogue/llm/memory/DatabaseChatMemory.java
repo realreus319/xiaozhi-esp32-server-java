@@ -12,13 +12,12 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * 基于数据库的聊天记忆实现
- * 全局单例类，负责Conversatin里消息的获取、保存、清理。
+ * 全局单例类，负责Conversation里消息的获取、保存、清理。
  * 后续考虑：DatabaseChatMemory 是对 SysMessageService 的一层薄封装，未来或者有可能考虑合并这两者。
  */
 @Service
@@ -34,60 +33,13 @@ public class DatabaseChatMemory  implements ChatMemory {
     }
 
     @Override
-    public void save(String deviceId, Integer roleId, String sessionId, List<Message> messages) {
-        if (messages == null || messages.isEmpty()) {
-            return ;
-        }
-        // 异步虚拟线程处理持久化。
-        Thread.startVirtualThread(() -> {
-            try {
-                // 创建消息列表的副本，避免并发修改异常
-                // 使用synchronized确保线程安全
-                List<Message> messagesCopy;
-                synchronized (messages) {
-                    messagesCopy = new ArrayList<>(messages);
-                }
-                
-                List<SysMessage> messageList = messagesCopy.stream()
-                        .filter(msg -> msg != null) // 过滤掉null消息
-                        .map(msg -> {
-                            try {
-                                SysMessage message = new SysMessage();
-                                message.setDeviceId(deviceId);
-                                message.setSessionId(sessionId);
-                                message.setSender(msg.getMessageType().getValue());
-                                message.setMessage(msg.getText());
-                                message.setRoleId(roleId);
-                                String sysMessageType = ChatMemory.getSysMessageType(msg);
-                                message.setMessageType(sysMessageType);
-                                Long timeMillis = ChatMemory.getTimeMillis(msg);
-                                Instant instant = Instant.ofEpochMilli(timeMillis).truncatedTo(ChronoUnit.SECONDS);
-                                message.setCreateTime(Date.from(instant));
-
-                                return message;
-                            } catch (Exception msgException) {
-                                logger.warn("处理单个消息时出错，跳过该消息: {}", msgException.getMessage());
-                                return null;
-                            }
-                        })
-                        .filter(msg -> msg != null) // 过滤掉处理失败的消息
-                        .toList();
-                        
-                if (!messageList.isEmpty()) {
-                    messageMapper.saveAll(messageList);
-                }
-            } catch (Exception e) {
-                logger.error("保存消息时出错: {}", e.getMessage(), e);
-            }
-        });
-    }
-
-    @Override
     public List<Message> find(String deviceId, int roleId, int limit) {
         try {
             List<SysMessage> messages = messageMapper.find(deviceId, roleId, limit);
             messages = new ArrayList<>(messages);
-            messages.sort(Comparator.comparing(Base::getCreateTime));
+            // 按时间升序排序，时间相同时按sender降序排序，保持user在assistant前面
+            messages.sort(Comparator.<SysMessage, Date>comparing(SysMessage::getCreateTime)
+                                    .thenComparing(SysMessage::getSender, Comparator.reverseOrder()));
             if (messages == null || messages.isEmpty()) {
                 return Collections.emptyList();
             }
@@ -108,7 +60,7 @@ public class DatabaseChatMemory  implements ChatMemory {
         Map<String, Object> metadata = Map.of("messageId", message.getMessageId(), ChatMemory.MESSAGE_TYPE_KEY,
                 message.getMessageType());
         return switch (role) {
-            case "assistant" -> new AssistantMessage(message.getMessage(), metadata);
+            case "assistant" -> AssistantMessage.builder().content(message.getMessage()).properties(metadata).build();
             case "user" -> UserMessage.builder().text(message.getMessage()).metadata(metadata).build();
             default -> throw new IllegalArgumentException("Invalid role: " + role);
         };

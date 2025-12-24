@@ -92,7 +92,7 @@ public class EmailUtils {
         String content = "尊敬的用户您好!您的验证码为:<h3>" + code + "</h3>如不是您操作,请忽略此邮件.(有效期10分钟)";
         return sendEmail(to, subject, content);
     }
-        
+    
     /**
      * 简单验证邮箱格式
      * 

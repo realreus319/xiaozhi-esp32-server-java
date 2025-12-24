@@ -44,6 +44,21 @@ public class EdgeTtsService implements TtsService {
     }
 
     @Override
+    public String getVoiceName() {
+        return voiceName;
+    }
+
+    @Override
+    public Float getSpeed() {
+        return speed;
+    }
+
+    @Override
+    public Float getPitch() {
+        return pitch;
+    }
+
+    @Override
     public String audioFormat() {
         return "mp3";
     }
@@ -82,13 +97,13 @@ public class EdgeTtsService implements TtsService {
         byte[] pcmData = AudioUtils.mp3ToPcm(fullPath);
 
         // 2. 将PCM转换回WAV (使用AudioUtils中的设置：16kHz, 单声道, 160kbps)
-        String resampledFileName = AudioUtils.saveAsWav(pcmData);
+        String resampledFilePath = AudioUtils.saveAsWav(pcmData);
 
         // 3. 删除原始文件
         Files.deleteIfExists(Paths.get(fullPath));
 
         // 4. 返回重采样后的文件路径
-        return AudioUtils.AUDIO_PATH + resampledFileName;
+        return resampledFilePath;
     }
 
 }

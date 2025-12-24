@@ -30,6 +30,7 @@ export default {
     total: 'Total',
     items: 'items',
     all: 'All',
+    or: 'OR',
     export: 'Export Data',
     import: 'Import Data',
     download: 'Download',
@@ -68,6 +69,7 @@ export default {
     successMessage: 'Operation successful',
     errorMessage: 'Operation failed',
     loadDataFailed: 'Failed to load data',
+    customize: 'Customize',
     // Common fields
     avatar: 'Avatar',
     name: 'Name',
@@ -91,6 +93,8 @@ export default {
     // File upload validation
     onlyImageFiles: 'Only image files allowed!',
     imageSizeLimit: 'Image size cannot exceed 2MB!',
+    audioFormatError: 'Only audio files (WAV, MP3, M4A, FLAC, OGG) are allowed!',
+    audioSizeError: 'Audio file size cannot exceed 10MB!',
     // Common prompts
     confirmSetDefault: 'Are you sure to set this {type} as default?',
     setDefaultTip: 'After setting as default, the system will prioritize this {type}, and the original default {type} will be unset.',
@@ -138,10 +142,7 @@ export default {
     audioPathInvalid: 'Audio path invalid',
     audioTestFailed: 'Audio test failed',
     audioGenerateFailed: 'Failed to generate audio',
-    audioNotGenerated: 'Audio not generated',
     audioUploadFailed: 'Audio upload failed',
-    audioFormatError: 'Only WAV or MP3 format audio files can be uploaded',
-    audioSizeError: 'Audio file cannot exceed 10MB',
     audioProcessFailed: 'Failed to process audio',
   },
 
@@ -293,6 +294,10 @@ export default {
     bindRole: 'Bind Role',
     confirmClearMemory: 'Are you sure to clear all conversation memory for this device? This operation cannot be undone.',
     clearMemory: 'Clear Memory',
+    clearingMemory: 'Clearing memory...',
+    memoryType: 'Memory Type',
+    windowMemory: 'Window Memory',
+    allMemory: 'All Memory',
   },
 
   role: {
@@ -339,20 +344,20 @@ export default {
     voiceType: 'Voice Type',
     standardVoice: 'Standard',
     voiceSynthesisAdvanced: 'Voice Synthesis Advanced Settings',
-    voiceSpeed: 'Speech Rate',
-    voiceSpeedTip: 'Control speech playback speed, range 0.5-2.0, default 1.0 (0.5=slow, 1.0=normal, 2.0=fast)',
-    voicePitch: 'Pitch',
-    voicePitchTip: 'Control voice pitch level, range 0.5-2.0, default 1.0 (0.5=low, 1.0=normal, 2.0=high)',
-    
+    voiceSpeed: 'Voice Speed',
+    voiceSpeedTip: 'Control voice playback speed, range 0.5-2.0, default 1.0',
+    voicePitch: 'Voice Pitch',
+    voicePitchTip: 'Control voice pitch, range 0.5-2.0, default 1.0',
+
     // Role prompt
     rolePrompt: 'Role Prompt',
     agentPrompt: 'Agent mode uses built-in prompts, no additional setup required',
-    agentPromptDesc: 'Agent includes preset prompts, will automatically use agent description as role prompt',
+    agentPromptDesc: 'Agent includes preset prompts and knowledge base, will automatically use agent description as role prompt',
     useTemplate: 'Use Template',
     custom: 'Custom',
     selectTemplate: 'Select Template',
     templateManagement: 'Template Management',
-    enterRolePrompt: 'Enter role prompt, describe character traits and behavior patterns',
+    enterRolePrompt: 'Enter role prompt, describe character traits, knowledge background and behavior patterns',
     
     // Operations
     cancel: 'Cancel',
@@ -374,7 +379,16 @@ export default {
     loadTemplateFailed: 'Failed to load template list',
     voskLocalRecognition: 'Vosk Local Recognition',
     unknownModel: 'Unknown Model',
-    voiceTestMessage: 'Hello, I am your voice assistant, I am very happy to serve you'
+    voiceTestMessage: 'Hello, I am your voice assistant, I am very happy to serve you',
+    
+    // Memory type configuration
+    memoryTypeSettings: 'Memory Type Configuration',
+    memoryTypeLabel: 'Memory Type',
+    selectMemoryType: 'Please select memory type',
+    memoryTypeTip: 'Select the memory type for this role, different types have different storage and recall mechanisms',
+
+    // Memory management
+    memory: 'Memory',
   },
 
   template: {
@@ -398,7 +412,7 @@ export default {
     enterCustomCategory: 'Please enter custom category name',
     enterTemplateDesc: 'Please enter template description',
     enterTemplateContent: 'Please enter template content',
-    templateContentPlaceholder: 'Please enter template content, describing the character\'s characteristics and behavior',
+    templateContentPlaceholder: 'Please enter template content, describing the character\'s characteristics, knowledge background and behavior',
     defaultTip: 'When set as default, this template will be displayed first',
     categoryBasic: 'Basic Role',
     categoryProfessional: 'Professional Role',
@@ -473,20 +487,25 @@ export default {
       agentDesc: 'Agent Description',
       publishTime: 'Publish Time',
       botId: 'Bot ID',
-      coze: 'Coze',
-      dify: 'Dify',
+      coze: 'Coze(www.coze.cn)',
+      dify: 'Dify(dify.ai)',
+      xingchen: 'XingChen(agent.xfyun.cn)',
       appId: 'App ID',
       spaceId: 'Space ID',
       publicKey: 'Public Key',
       privateKey: 'Private Key',
       apiUrl: 'API URL',
       apiKey: 'API Key',
+      authCode: 'Authorization Code',
+      flowId: 'Flow ID',
       enterAppId: 'Please enter Coze App ID',
       enterSpaceId: 'Please enter Coze Space ID',
       enterPublicKey: 'Please enter public key',
       enterPrivateKey: 'Please enter private key',
       enterApiUrl: 'Please enter API URL',
       enterApiKey: 'Please enter API Key',
+      enterAuthCode: 'Concatenate API Key:API Secret',
+      enterFlowId: 'Please enter Flow ID',
       enterAgentName: 'Please enter agent name',
     },
 
@@ -634,7 +653,9 @@ export default {
       agent: 'Agent Management',
       sttConfig: 'STT Configuration',
       ttsConfig: 'TTS Configuration',
+      memoryManagement: 'Memory Management',
       chat: 'Chat',
+      drama: 'Drama',
       account: 'Account',
       personalConfig: 'Settings',
       error403: '403 - Forbidden',
@@ -711,4 +732,10 @@ export default {
 
   },
 
+  memory: {
+    chat: 'Chat History',
+    content: 'Content',
+    confirmDelete: 'Are you sure to delete this memory? This operation cannot be undone.',
+  },
 }
+

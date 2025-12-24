@@ -61,6 +61,14 @@ public interface SysDeviceService {
   int update(SysDevice device);
 
   /**
+   * 批量更新设备
+   * @param deviceIds 设备ID列表
+   * @param userId 用户ID
+   * @return 成功更新的设备数量
+   */
+  int batchUpdate(List<String> deviceIds, Integer userId, Integer roleId);
+
+  /**
    * 删除设备
    * 
    * @param device
@@ -68,10 +76,4 @@ public interface SysDeviceService {
    */
   int delete(SysDevice device);
 
-  /**
-   * 生成设备访问平台的token
-   * @param deviceId
-   * @return
-   */
-  String generateToken(String deviceId);
 }

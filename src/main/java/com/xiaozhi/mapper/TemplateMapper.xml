@@ -51,8 +51,6 @@
             templateDesc,
             templateContent,
             category,
-            isDefault,
-            state,
             createTime,
             updateTime
         ) values (
@@ -61,8 +59,6 @@
             #{templateDesc},
             #{templateContent},
             #{category},
-            #{isDefault},
-            #{state},
             now(),
             now()
         )
@@ -85,5 +81,8 @@
         UPDATE sys_template SET isDefault = '0' WHERE isDefault = 1 AND userId = #{userId}
     </update>
 
-    
+    <update id="delete" parameterType="Integer">
+        UPDATE sys_template SET state = '0' WHERE templateId = #{templateId}
+    </update>
+
 </mapper>

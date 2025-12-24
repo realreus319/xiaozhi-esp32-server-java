@@ -1,6 +1,7 @@
 package com.xiaozhi.dialogue.llm.tool.config;
 
 import com.xiaozhi.dialogue.llm.tool.XiaoZhiToolCallingManager;
+import com.xiaozhi.dialogue.llm.tool.observation.ChatModelObservationHandler;
 import io.micrometer.observation.ObservationRegistry;
 import org.springframework.ai.model.tool.ToolCallingManager;
 import org.springframework.ai.tool.execution.DefaultToolExecutionExceptionProcessor;
@@ -24,4 +25,15 @@ public class ToolCallConfig {
         return new XiaoZhiToolCallingManager(observationRegistry, toolCallbackResolver,
                 toolExecutionExceptionProcessor == null ? defaultToolExecutionExceptionProcessor : toolExecutionExceptionProcessor);
     }
+    
+    /**
+     * 注册聊天模型观察处理器
+     * 这个Bean会自动被Spring的ObservationRegistry发现并注册
+     * 用于在流式响应完成后添加 AssistantMessage 到 Conversation
+     */
+    @Bean
+    public ChatModelObservationHandler chatModelObservationHandler() {
+        return new ChatModelObservationHandler();
+    }
+
 }

@@ -8,10 +8,7 @@ import com.xiaozhi.dialogue.llm.memory.ConversationFactory;
 import com.xiaozhi.dialogue.llm.providers.OpenAiLlmService;
 import com.xiaozhi.dialogue.llm.tool.ToolsGlobalRegistry;
 import com.xiaozhi.dialogue.llm.tool.ToolsSessionHolder;
-import com.xiaozhi.dialogue.service.AudioService;
-import com.xiaozhi.dialogue.service.DialogueService;
-import com.xiaozhi.dialogue.service.IotService;
-import com.xiaozhi.dialogue.service.VadService;
+import com.xiaozhi.dialogue.service.*;
 import com.xiaozhi.dialogue.stt.factory.SttServiceFactory;
 import com.xiaozhi.dialogue.tts.factory.TtsServiceFactory;
 import com.xiaozhi.entity.SysConfig;
@@ -21,6 +18,7 @@ import com.xiaozhi.enums.ListenState;
 import com.xiaozhi.event.ChatAbortEvent;
 import com.xiaozhi.service.SysConfigService;
 import com.xiaozhi.service.SysDeviceService;
+import com.xiaozhi.service.SysMessageService;
 import com.xiaozhi.service.SysRoleService;
 import jakarta.annotation.Resource;
 import org.slf4j.Logger;
@@ -45,9 +43,6 @@ public class MessageHandler {
 
     @Resource
     private SysDeviceService deviceService;
-
-    @Resource
-    private AudioService audioService;
 
     @Resource
     private VadService vadService;
@@ -84,6 +79,12 @@ public class MessageHandler {
 
     @Resource
     private ApplicationContext applicationContext;
+
+    @Resource
+    private MessageService messageService;
+
+    @Resource
+    private SysMessageService sysMessageService;
 
     // 用于存储设备ID和验证码生成状态的映射
     private final Map<String, Boolean> captchaGenerationInProgress = new ConcurrentHashMap<>();
@@ -185,19 +186,33 @@ public class MessageHandler {
      */
     public void afterConnectionClosed(String sessionId) {
         ChatSession chatSession = sessionManager.getSession(sessionId);
-        if (chatSession == null || !chatSession.isOpen()) {
+        if (chatSession == null) {
             return;
         }
         // 连接关闭时清理资源
         SysDevice device = sessionManager.getDeviceConfig(sessionId);
         if (device != null) {
+            String deviceId = device.getDeviceId();
+
             Thread.startVirtualThread(() -> {
                 try {
+                    // 根据连接类型判断设备状态：
+                    // WebSocket 连接关闭 -> OFFLINE（离线）
+                    String newState = chatSession instanceof WebSocketSession ?
+                            SysDevice.DEVICE_STATE_OFFLINE : SysDevice.DEVICE_STATE_STANDBY;
+
+                    // 时序保护：检查设备是否已重连
+                    ChatSession currentSession = sessionManager.getSessionByDeviceId(deviceId);
+                    if (currentSession != null && !sessionId.equals(currentSession.getSessionId())) {
+                        return;
+                    }
+
                     deviceService.update(new SysDevice()
-                            .setDeviceId(device.getDeviceId())
-                            .setState(SysDevice.DEVICE_STATE_OFFLINE)
+                            .setDeviceId(deviceId)
+                            .setState(newState)
                             .setLastLogin(new Date().toString()));
-                    logger.info("连接已关闭 - SessionId: {}, DeviceId: {}", sessionId, device.getDeviceId());
+                    logger.info("连接已关闭 - SessionId: {}, DeviceId: {}, 新状态: {}",
+                            sessionId, deviceId, newState);
                 } catch (Exception e) {
                     logger.error("更新设备状态失败", e);
                 }
@@ -207,10 +222,8 @@ public class MessageHandler {
         sessionManager.closeSession(sessionId);
         // 清理VAD会话
         vadService.resetSession(sessionId);
-        // 清理音频处理会话
-        audioService.cleanupSession(sessionId);
         // 清理对话
-        dialogueService.cleanupSession(sessionId);
+        dialogueService.cleanupSession(chatSession);
 
     }
 
@@ -328,13 +341,16 @@ public class MessageHandler {
 
         Thread.startVirtualThread(() -> {
             try {
+                // 对于未绑定设备， 播放器是一次性用途，不需要绑定到ChatSession。
+                Player player = new FilePlayer(chatSession, messageService, sessionManager, sysMessageService);
                 // 设备已注册但未配置模型
                 if (device.getDeviceName() != null && device.getRoleId() == null) {
                     String message = "设备未配置角色，请到角色配置页面完成配置后开始对话";
 
                     String audioFilePath = ttsFactory.getDefaultTtsService().textToSpeech(message);
-                    audioService.sendAudioMessage(chatSession, new DialogueService.Sentence(message, audioFilePath), true,
-                            true);
+
+                    player.append(new Sentence(message, audioFilePath));
+                    player.play();
 
                     // 延迟一段时间后再解除标记
                     try {
@@ -361,9 +377,8 @@ public class MessageHandler {
                     audioFilePath = codeResult.getAudioPath();
                 }
 
-                audioService.sendAudioMessage(chatSession,
-                        new DialogueService.Sentence(codeResult.getCode(), codeResult.getAudioPath()), true, true);
-
+                player.append(new Sentence(codeResult.getCode(), codeResult.getAudioPath()));
+                player.play();
                 // 延迟一段时间后再解除标记
                 try {
                     Thread.sleep(1000);
@@ -385,6 +400,19 @@ public class MessageHandler {
     private void handleListenMessage(ChatSession chatSession, ListenMessage message) {
         String sessionId = chatSession.getSessionId();
         logger.info("收到listen消息 - SessionId: {}, State: {}, Mode: {}", sessionId, message.getState(), message.getMode());
+
+        boolean isGoodbye = false;
+
+        // 检查会话是否已发送goodbye，如果是则忽略listen消息
+        if (isGoodbye) {
+            return;
+        }
+
+        // 如果会话标记为即将关闭，忽略listen消息
+        if (chatSession.isCloseAfterChat()) {
+            return;
+        }
+
         chatSession.setMode(message.getMode());
 
         // 根据state处理不同的监听状态
@@ -392,6 +420,11 @@ public class MessageHandler {
             case ListenState.Start:
                 // 开始监听，准备接收音频数据
                 logger.info("开始监听 - Mode: {}", message.getMode());
+
+                // 如果处于唤醒响应状态，先发送tts start，让设备进入播放状态
+                if (chatSession.isInWakeupResponse()) {
+                    messageService.sendTtsMessage(chatSession, null, "start");
+                }
 
                 // 初始化VAD会话
                 vadService.initSession(sessionId);
@@ -411,10 +444,11 @@ public class MessageHandler {
 
             case ListenState.Text:
                 // 检测聊天文本输入
-                if (audioService.isPlaying(sessionId)) {
+                Player player = chatSession.getPlayer();
+                if (player != null ) {
                     applicationContext.publishEvent(new ChatAbortEvent(chatSession, message.getMode().getValue()));
                 }
-                dialogueService.handleText(chatSession, message.getText(), null);
+                dialogueService.handleText(chatSession, message.getText());
                 break;
 
             case ListenState.Detect:
@@ -449,6 +483,14 @@ public class MessageHandler {
     }
 
     private void handleGoodbyeMessage(ChatSession session, GoodbyeMessage message) {
+
+        // 先清理VAD会话，防止后续的listen消息重新初始化VAD
+        String sessionId = session.getSessionId();
+        vadService.resetSession(sessionId);
+
+        // 中止正在进行的对话，停止TTS和音频发送
+        applicationContext.publishEvent(new ChatAbortEvent(session, "设备主动退出"));
+
         sessionManager.closeSession(session);
         if(!(session instanceof WebSocketSession)){
             if (session.getSysDevice() != null) {

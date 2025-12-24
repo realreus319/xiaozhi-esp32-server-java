@@ -168,13 +168,20 @@
             <if test="state != null and state != ''">state = #{state},</if>
         </set>
         <where>
-            <if test="username != null and username != ''">AND `username` = #{username}</if>
-            <if test="email != null and email != ''">AND email = #{email}</if>
-            <if test="tel != null and tel != ''">AND tel = #{tel}</if>
-            <!-- 安全检查：如果没有任何条件，添加一个永远为false的条件 -->
-            <if test="(username == null or username == '') and (email == null or email == '') and (tel == null or tel == '')">
-                AND 1 = 0
-            </if>
+            <!-- 优先使用 userId（主键，最可靠） -->
+            <choose>
+                <when test="userId != null and userId != ''">
+                    userId = #{userId}
+                </when>
+                <!-- 如果没有 userId，使用 username -->
+                <when test="username != null and username != ''">
+                    `username` = #{username}
+                </when>
+                <!-- 安全检查：如果既没有 userId 也没有 username，禁止更新 -->
+                <otherwise>
+                    1 = 0
+                </otherwise>
+            </choose>
         </where>
     </update>
 

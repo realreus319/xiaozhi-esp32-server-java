@@ -89,7 +89,42 @@ export function useAuth() {
         }
 
         message.success(t('auth.loginSuccess'))
-        router.push('/dashboard')
+        
+        // 根据用户类型跳转到不同页面
+        // 管理员跳转到 dashboard，普通用户跳转到 agents
+        const isAdmin = res.data.user && res.data.user.isAdmin === '1'
+        const defaultRoute = isAdmin ? '/dashboard' : '/agents'
+        
+        // 获取重定向路径
+        let redirect = router.currentRoute.value.query.redirect as string || defaultRoute
+        
+        // 检查用户是否有权限访问redirect路径
+        if (redirect && redirect !== defaultRoute) {
+          const targetRoute = router.resolve(redirect)
+          if (targetRoute && targetRoute.meta) {
+            // 检查是否需要管理员权限
+            if (targetRoute.meta.isAdmin && !isAdmin) {
+              redirect = defaultRoute
+            }
+            // 检查特定权限
+            else if (targetRoute.meta.permission) {
+              const hasPermission = userStore.hasPermission(targetRoute.meta.permission as string)
+              if (!hasPermission) {
+                redirect = defaultRoute
+              }
+            }
+            // 检查多个权限（任一即可）
+            else if (targetRoute.meta.permissions && Array.isArray(targetRoute.meta.permissions)) {
+              const hasAnyPermission = userStore.hasAnyPermission(targetRoute.meta.permissions as string[])
+              if (!hasAnyPermission) {
+                redirect = defaultRoute
+              }
+            }
+          }
+        }
+        
+        // 跳转到指定页面
+        router.push(redirect)
         return true
       } else {
         message.error(res.message || t('auth.loginFailed'))
@@ -195,7 +230,40 @@ export function useAuth() {
         userStore.setRefreshToken(res.data.refreshToken)
 
         message.success(t('auth.loginSuccess'))
-        router.push('/dashboard')
+        
+        // 根据用户类型跳转到不同页面
+        const isAdmin = res.data.user && res.data.user.isAdmin === '1'
+        const defaultRoute = isAdmin ? '/dashboard' : '/agents'
+        
+        // 获取重定向路径
+        let redirect = router.currentRoute.value.query.redirect as string || defaultRoute
+        
+        // 检查用户是否有权限访问redirect路径
+        if (redirect && redirect !== defaultRoute) {
+          const targetRoute = router.resolve(redirect)
+          if (targetRoute && targetRoute.meta) {
+            // 检查是否需要管理员权限
+            if (targetRoute.meta.isAdmin && !isAdmin) {
+              redirect = defaultRoute
+            }
+            // 检查特定权限
+            else if (targetRoute.meta.permission) {
+              const hasPermission = userStore.hasPermission(targetRoute.meta.permission as string)
+              if (!hasPermission) {
+                redirect = defaultRoute
+              }
+            }
+            // 检查多个权限（任一即可）
+            else if (targetRoute.meta.permissions && Array.isArray(targetRoute.meta.permissions)) {
+              const hasAnyPermission = userStore.hasAnyPermission(targetRoute.meta.permissions as string[])
+              if (!hasAnyPermission) {
+                redirect = defaultRoute
+              }
+            }
+          }
+        }
+        
+        router.push(redirect)
         return true
       } else if (res.code === 201) {
         // 未注册的手机号

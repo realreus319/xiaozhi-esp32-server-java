@@ -15,14 +15,21 @@ export function queryRoles(params: Partial<RoleQueryParams>) {
  * 添加角色
  */
 export function addRole(data: Partial<RoleFormData> & { avatar?: string }) {
-  return http.post(api.role.add, data)
+  return http.postJSON(api.role.add, data)
 }
 
 /**
  * 更新角色
  */
 export function updateRole(data: Partial<RoleFormData>) {
-  return http.post(api.role.update, data)
+  return http.putJSON(`${api.role.update}/${data.roleId}`, data)
+}
+
+/**
+ * 删除角色
+ */
+export function deleteRole(roleId: number) {
+  return http.delete(`${api.role.delete}/${roleId}`)
 }
 
 /**

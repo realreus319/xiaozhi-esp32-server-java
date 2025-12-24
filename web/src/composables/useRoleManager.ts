@@ -40,10 +40,11 @@ export function useRoleManager() {
     modelLoading.value = true
     try {
       // 并行加载LLM和Agent
-      const [llmRes, cozeRes, difyRes] = await Promise.all([
+      const [llmRes, cozeRes, difyRes, xingchenRes] = await Promise.all([
         queryConfigs({ configType: 'llm', start: 1, limit: 1000 }),
         queryAgents({ provider: 'coze', configType: 'agent', start: 1, limit: 1000 }),
-        queryAgents({ provider: 'dify', configType: 'agent', start: 1, limit: 1000 })
+        queryAgents({ provider: 'dify', configType: 'agent', start: 1, limit: 1000 }),
+        queryAgents({ provider: 'xingchen', configType: 'agent', start: 1, limit: 1000 })
       ])
 
       const models: ModelOption[] = []
@@ -93,6 +94,22 @@ export function useRoleManager() {
             desc: agent.agentDesc,
             type: 'agent',
             provider: 'dify',
+            agentName: agent.agentName,
+            agentDesc: agent.agentDesc
+          })
+        })
+      }
+
+      // 处理XingChen Agent
+      if (xingchenRes.code === 200 && xingchenRes.data?.list) {
+        xingchenRes.data.list.forEach((agent: Agent) => {
+          agentConfigs.value.push(agent)
+          models.push({
+            label: `${agent.agentName} (XingChen智能体)`,
+            value: agent.configId,
+            desc: agent.agentDesc,
+            type: 'agent',
+            provider: 'xingchen',
             agentName: agent.agentName,
             agentDesc: agent.agentDesc
           })
@@ -279,8 +296,10 @@ export function useRoleManager() {
       volcengine: '火山引擎',
       xfyun: '讯飞云',
       minimax: 'Minimax',
+      tencent: '腾讯云',
       coze: 'Coze',
-      dify: 'Dify'
+      dify: 'Dify',
+      xingchen: 'XingChen'
     }
     return names[provider] || provider.charAt(0).toUpperCase() + provider.slice(1)
   }

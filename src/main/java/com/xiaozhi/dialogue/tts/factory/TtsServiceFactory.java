@@ -1,9 +1,12 @@
 package com.xiaozhi.dialogue.tts.factory;
 
+import com.xiaozhi.dialogue.token.TokenService;
+import com.xiaozhi.dialogue.token.factory.TokenServiceFactory;
 import com.xiaozhi.dialogue.tts.TtsService;
 import com.xiaozhi.dialogue.tts.providers.*;
 import com.xiaozhi.entity.SysConfig;
 
+import jakarta.annotation.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -21,8 +24,11 @@ public class TtsServiceFactory {
     // 缓存已初始化的服务：键为"provider:configId:voiceName"格式，确保音色变化时创建新实例
     private final Map<String, TtsService> serviceCache = new ConcurrentHashMap<>();
 
+    @Resource
+    private TokenServiceFactory tokenServiceFactory;
+
     // 语音生成文件保存地址
-    private static final String OUTPUT_PATH = "audio/";
+    public static final String OUTPUT_PATH = "audio/";
 
     // 默认服务提供商名称
     private static final String DEFAULT_PROVIDER = "edge";
@@ -55,18 +61,17 @@ public class TtsServiceFactory {
         config = !ObjectUtils.isEmpty(config) ? config : new SysConfig().setProvider(DEFAULT_PROVIDER);
 
         // 如果提供商为空，则使用默认提供商
-        var provider = config.getProvider();
-        
-        var cacheKey = createCacheKey(config, provider, voiceName, pitch, speed);
+        String provider = config.getProvider();
+        String cacheKey = createCacheKey(config, provider, voiceName, pitch, speed);
 
         // 检查是否已有该配置的服务实例
         if (serviceCache.containsKey(cacheKey)) {
             return serviceCache.get(cacheKey);
         }
 
-        var service = createApiService(config, voiceName, pitch, speed);
-        serviceCache.put(cacheKey, service);
-        return service;
+        TtsService newService = createApiService(config, voiceName, pitch, speed);
+        serviceCache.put(cacheKey, newService);
+        return newService;
     }
 
     /**
@@ -79,6 +84,11 @@ public class TtsServiceFactory {
 
         return switch (config.getProvider()) {
             case "aliyun" -> new AliyunTtsService(config, voiceName, pitch, speed, outputPath);
+            case "aliyun-nls" -> {
+                // 为NLS创建阿里云Token服务
+                TokenService aliyunTokenService = tokenServiceFactory.getTokenService(config);
+                yield new AliyunNlsTtsService(config, voiceName, pitch, speed, outputPath, aliyunTokenService);
+            }
             case "volcengine" -> new VolcengineTtsService(config, voiceName, pitch, speed, outputPath);
             case "xfyun" -> new XfyunTtsService(config, voiceName, pitch, speed, outputPath);
             case "minimax" -> new MiniMaxTtsService(config, voiceName, pitch, speed, outputPath);
@@ -99,7 +109,7 @@ public class TtsServiceFactory {
 
         String provider = config.getProvider();
         Integer configId = config.getConfigId();
-        
+
         // 遍历缓存的所有键，找到匹配的键并移除
         serviceCache.keySet().removeIf(key -> {
             String[] parts = key.split(":");
@@ -108,7 +118,7 @@ public class TtsServiceFactory {
             }
             String keyProvider = parts[0];
             String keyConfigId = parts[1];
-            
+
             // 检查provider和configId是否匹配
             return keyProvider.equals(provider) && keyConfigId.equals(String.valueOf(configId));
         });

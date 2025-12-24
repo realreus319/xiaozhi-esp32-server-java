@@ -62,27 +62,31 @@ public class FileUploadController {
 
         // 使用FileUploadUtils进行智能上传（根据配置自动选择上传到本地或腾讯云COS）
         try {
-            String fileUrl = FileUploadUtils.smartUpload(uploadPath, relativePath, fileName, file);
-            logger.info("文件上传成功: {}", fileUrl);
+            String filePathOrUrl = FileUploadUtils.smartUpload(uploadPath, relativePath, fileName, file);
+            logger.info("文件上传成功: {}", filePathOrUrl);
 
             // 计算文件哈希值
             String fileHash = FileHashUtil.calculateSha256(file);
 
-            // 判断是否是COS URL
-            boolean isCosUrl = fileUrl.startsWith("https://") && fileUrl.contains(".cos.");
+            // 判断是否是COS URL（完整的https URL）
+            boolean isCosUrl = filePathOrUrl.startsWith("https://") || filePathOrUrl.startsWith("http://");
 
             ResultMessage result = ResultMessage.success("上传成功");
-            result.put("url", fileUrl);
             result.put("fileName", originalFilename);
             result.put("newFileName", fileName);
             result.put("hash", fileHash);
 
-            // 如果是本地URL，需要调整格式
+            // 如果是本地相对路径，转换为完整的访问URL
             if (!isCosUrl) {
-                // 将本地路径转换为完整的访问URL格式
-                String relativeUrl = "uploads/" + relativePath + "/" + fileName;
-                String fullUrl = cmsUtils.getServerAddress() + "/" + relativeUrl;
+                // filePathOrUrl 是相对路径，如：uploads/audio/2025/01/24/xxx.mp3
+                String fullUrl = cmsUtils.getServerAddress() + "/" + filePathOrUrl;
                 result.put("url", fullUrl);
+                result.put("relativePath", filePathOrUrl); // 同时返回相对路径，方便存储
+                logger.info("本地文件上传 - 相对路径: {}, 完整URL: {}", filePathOrUrl, fullUrl);
+            } else {
+                // COS URL 直接返回
+                result.put("url", filePathOrUrl);
+                logger.info("COS文件上传 - URL: {}", filePathOrUrl);
             }
 
             return result;
